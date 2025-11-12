@@ -1,0 +1,56 @@
+:root {
+  --rl4-bg-dark: #181625;
+  --rl4-bg-darker: #0D1117;
+  --rl4-accent-violet: #8920FE;
+  --rl4-accent-magenta: #BB2CFF;
+  --rl4-accent-turquoise: #16F7B5;
+  --rl4-text-primary: #EEF2FB;
+  --rl4-text-secondary: #B9B8C6;
+  --rl4-gradient: linear-gradient(90deg, #8920FE 10%, #38FFDB 100%);
+}
+
+.rl4-glow {
+  box-shadow: 0 0 12px #8920FE;
+  transition: box-shadow 0.3s ease;
+}
+
+.rl4-glow:hover {
+  box-shadow: 0 0 18px #16F7B5;
+}
+
+.rl4-btn-primary {
+  background: var(--rl4-accent-violet);
+  color: var(--rl4-text-primary);
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 0 12px #8920FE;
+}
+
+.rl4-btn-primary:hover {
+  background: var(--rl4-accent-magenta);
+  box-shadow: 0 0 16px var(--rl4-accent-turquoise);
+}
+
+.rl4-badge {
+  background: var(--rl4-accent-violet);
+  color: white;
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  box-shadow: 0 0 8px #38FFDB;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { 
+    box-shadow: 0 0 10px #8920FE; 
+  }
+  50% { 
+    box-shadow: 0 0 25px #16F7B5; 
+  }
+}
+
+.rl4-pulse {
+  animation: pulse-glow 2s infinite;
+}
+

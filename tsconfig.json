@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "out",
+    "rootDir": "extension",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@kernel/*": ["extension/kernel/*"],
+      "@kernel/adapters/*": ["extension/kernel/adapters/*"]
+    }
+  },
+  "include": ["extension/**/*"],
+  "exclude": ["node_modules", "out", "extension/webview/ui", "tests", "bench", "scripts"]
+}

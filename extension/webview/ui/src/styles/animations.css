@@ -1,0 +1,494 @@
+/**
+ * RL4 Cognitive OS - Neural Cockpit Animations
+ * Micro-animations vivantes, halos cognitifs, transitions fluides
+ */
+
+/* === Pulse Animation === */
+@keyframes rl4-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(137, 32, 254, 0.5);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 0 25px rgba(22, 247, 181, 0.8);
+  }
+}
+
+.rl4-pulse {
+  animation: rl4-pulse 2s ease-in-out infinite;
+}
+
+/* === Glow Animation === */
+@keyframes rl4-glow {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(137, 32, 254, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(137, 32, 254, 0.8), 0 0 30px rgba(22, 247, 181, 0.4);
+  }
+}
+
+.rl4-glow-animated {
+  animation: rl4-glow 3s ease-in-out infinite;
+}
+
+/* === Fade In === */
+@keyframes rl4-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rl4-fade-in {
+  animation: rl4-fade-in 0.4s ease-out;
+}
+
+/* === Fade In Up === */
+@keyframes rl4-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rl4-fade-in-up {
+  animation: rl4-fade-in-up 0.5s ease-out;
+}
+
+/* === Scale In === */
+@keyframes rl4-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.rl4-scale-in {
+  animation: rl4-scale-in 0.3s ease-out;
+}
+
+/* === Slide In Right === */
+@keyframes rl4-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.rl4-slide-in-right {
+  animation: rl4-slide-in-right 0.4s ease-out;
+}
+
+/* === Shimmer === */
+@keyframes rl4-shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.rl4-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(137, 32, 254, 0.1) 0%,
+    rgba(137, 32, 254, 0.3) 50%,
+    rgba(137, 32, 254, 0.1) 100%
+  );
+  background-size: 200% 100%;
+  animation: rl4-shimmer 2s ease-in-out infinite;
+}
+
+/* === Rotate === */
+@keyframes rl4-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rl4-rotate {
+  animation: rl4-rotate 2s linear infinite;
+}
+
+/* === Bounce === */
+@keyframes rl4-bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.rl4-bounce {
+  animation: rl4-bounce 1s ease-in-out infinite;
+}
+
+/* === Breathing === */
+@keyframes rl4-breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.9;
+  }
+}
+
+.rl4-breathe {
+  animation: rl4-breathe 3s ease-in-out infinite;
+}
+
+/* === Wave === */
+@keyframes rl4-wave {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.rl4-wave {
+  position: relative;
+  overflow: hidden;
+}
+
+.rl4-wave::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(22, 247, 181, 0.3),
+    transparent
+  );
+  animation: rl4-wave 2s ease-in-out infinite;
+}
+
+/* === Stagger Animation (for lists) === */
+.rl4-stagger-item {
+  opacity: 0;
+  animation: rl4-fade-in-up 0.5s ease-out forwards;
+}
+
+.rl4-stagger-item:nth-child(1) { animation-delay: 0.05s; }
+.rl4-stagger-item:nth-child(2) { animation-delay: 0.1s; }
+.rl4-stagger-item:nth-child(3) { animation-delay: 0.15s; }
+.rl4-stagger-item:nth-child(4) { animation-delay: 0.2s; }
+.rl4-stagger-item:nth-child(5) { animation-delay: 0.25s; }
+.rl4-stagger-item:nth-child(6) { animation-delay: 0.3s; }
+
+/* === Hover Lift === */
+.rl4-hover-lift {
+  transition: transform var(--rl4-transition-base), box-shadow var(--rl4-transition-base);
+}
+
+.rl4-hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--rl4-glow-violet);
+}
+
+/* === Focus Ring === */
+.rl4-focus-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(137, 32, 254, 0.4);
+}
+
+/* === Loading Spinner === */
+@keyframes rl4-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rl4-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(137, 32, 254, 0.2);
+  border-top-color: var(--rl4-violet);
+  border-radius: 50%;
+  animation: rl4-spin 0.6s linear infinite;
+}
+
+/* === Ripple Effect === */
+@keyframes rl4-ripple {
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+.rl4-ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.rl4-ripple::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  background: rgba(22, 247, 181, 0.5);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+}
+
+.rl4-ripple:active::after {
+  animation: rl4-ripple 0.6s ease-out;
+}
+
+/* === Neural Cockpit Animations === */
+
+/* Neural Pulse (système vivant) */
+@keyframes rl4-neural-pulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(137, 32, 254, 0.4);
+    transform: scale(1);
+  }
+  25% {
+    box-shadow: 0 0 35px rgba(137, 32, 254, 0.6), 0 0 50px rgba(22, 247, 181, 0.2);
+    transform: scale(1.02);
+  }
+  50% {
+    box-shadow: 0 0 45px rgba(137, 32, 254, 0.8), 0 0 70px rgba(22, 247, 181, 0.3);
+    transform: scale(1.03);
+  }
+  75% {
+    box-shadow: 0 0 35px rgba(248, 0, 124, 0.6), 0 0 50px rgba(22, 247, 181, 0.2);
+    transform: scale(1.01);
+  }
+}
+
+.rl4-neural-pulse {
+  animation: rl4-neural-pulse var(--rl4-glow-pulse) ease-in-out infinite;
+}
+
+/* Cognitive Glow (halo autour des éléments actifs) */
+@keyframes rl4-cognitive-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 20px rgba(137, 32, 254, 0.3),
+      0 0 40px rgba(137, 32, 254, 0.2),
+      inset 0 0 20px rgba(137, 32, 254, 0.1);
+  }
+  50% {
+    box-shadow:
+      0 0 30px rgba(22, 247, 181, 0.4),
+      0 0 60px rgba(22, 247, 181, 0.3),
+      inset 0 0 30px rgba(22, 247, 181, 0.15);
+  }
+}
+
+.rl4-cognitive-glow {
+  animation: rl4-cognitive-glow var(--rl4-breathe-speed) ease-in-out infinite;
+}
+
+/* Live Badge Animation */
+@keyframes rl4-live-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 10px rgba(248, 0, 124, 0.6);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 20px rgba(248, 0, 124, 0.9), 0 0 30px rgba(248, 0, 124, 0.4);
+  }
+}
+
+.rl4-live-badge {
+  animation: rl4-live-pulse var(--rl4-pulse-speed) ease-in-out infinite;
+}
+
+/* Tab Activation Animation */
+@keyframes rl4-tab-activate {
+  0% {
+    transform: scale(1);
+    background: rgba(137, 32, 254, 0.1);
+    border-color: rgba(137, 32, 254, 0.3);
+  }
+  50% {
+    transform: scale(1.05);
+    background: rgba(137, 32, 254, 0.2);
+    border-color: rgba(137, 32, 254, 0.6);
+  }
+  100% {
+    transform: scale(1);
+    background: rgba(137, 32, 254, 0.15);
+    border-color: rgba(137, 32, 254, 0.5);
+  }
+}
+
+.rl4-tab-activate {
+  animation: rl4-tab-activate var(--rl4-transition-bounce);
+}
+
+/* Button Neural Hover */
+@keyframes rl4-button-hover {
+  0% {
+    transform: translateY(0) scale(1);
+    box-shadow: 0 4px 16px rgba(137, 32, 254, 0.3);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 8px 24px rgba(137, 32, 254, 0.5), 0 0 20px rgba(22, 247, 181, 0.3);
+  }
+  100% {
+    transform: translateY(-4px) scale(1.03);
+    box-shadow: 0 12px 32px rgba(137, 32, 254, 0.6), 0 0 30px rgba(22, 247, 181, 0.4);
+  }
+}
+
+.rl4-button-neural:hover {
+  animation: rl4-button-hover var(--rl4-transition-base);
+}
+
+/* Card Float Animation */
+@keyframes rl4-card-float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.rl4-card-float:hover {
+  animation: rl4-card-float var(--rl4-transition-slow) ease-in-out infinite;
+}
+
+/* Neural Data Flow (pour les stats/metrics) */
+@keyframes rl4-data-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.rl4-data-flow {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(22, 247, 181, 0.3) 25%,
+    rgba(137, 32, 254, 0.4) 50%,
+    rgba(22, 247, 181, 0.3) 75%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: rl4-data-flow var(--rl4-breathe-speed) linear infinite;
+}
+
+/* Tension Indicator Animation */
+@keyframes rl4-tension-low {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(22, 247, 181, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(22, 247, 181, 0.7);
+  }
+}
+
+@keyframes rl4-tension-medium {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(255, 179, 71, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(255, 179, 71, 0.8);
+  }
+}
+
+@keyframes rl4-tension-high {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(248, 0, 124, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(248, 0, 124, 0.9);
+  }
+}
+
+.rl4-tension-low {
+  animation: rl4-tension-low var(--rl4-pulse-speed) ease-in-out infinite;
+}
+
+.rl4-tension-medium {
+  animation: rl4-tension-medium var(--rl4-pulse-speed) ease-in-out infinite;
+}
+
+.rl4-tension-high {
+  animation: rl4-tension-high var(--rl4-pulse-speed) ease-in-out infinite;
+}
+
+/* Neural Flicker (effet de scintillement subtil) */
+@keyframes rl4-neural-flicker {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.95;
+  }
+  52% {
+    opacity: 1;
+  }
+  54% {
+    opacity: 0.97;
+  }
+  56% {
+    opacity: 1;
+  }
+}
+
+.rl4-neural-flicker {
+  animation: rl4-neural-flicker var(--rl4-neural-flicker) ease-in-out infinite;
+}
+
+/* Stagger Neural List (pour les cartes/stats) */
+.rl4-stagger-neural > * {
+  opacity: 0;
+  transform: translateY(20px);
+  animation: rl4-fade-in-up 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.rl4-stagger-neural > *:nth-child(1) { animation-delay: 0.05s; }
+.rl4-stagger-neural > *:nth-child(2) { animation-delay: 0.1s; }
+.rl4-stagger-neural > *:nth-child(3) { animation-delay: 0.15s; }
+.rl4-stagger-neural > *:nth-child(4) { animation-delay: 0.2s; }
+.rl4-stagger-neural > *:nth-child(5) { animation-delay: 0.25s; }
+.rl4-stagger-neural > *:nth-child(6) { animation-delay: 0.3s; }
+.rl4-stagger-neural > *:nth-child(7) { animation-delay: 0.35s; }
+.rl4-stagger-neural > *:nth-child(8) { animation-delay: 0.4s; }
+

@@ -1,0 +1,42 @@
+# RL4 — .vscodeignore
+# Files to exclude from VSIX package
+
+# Source files (only built files needed)
+extension/**/*.ts
+!extension/**/*.d.ts
+extension/webview/ui/src/**
+extension/webview/ui/node_modules/**
+extension/webview/ui/tsconfig.json
+extension/webview/ui/vite.config.ts
+
+# Development
+.vscode/**
+.git/**
+.gitignore
+.github/**
+node_modules/**
+tsconfig.json
+webpack.config.js
+
+# Documentation (keep only README, CHANGELOG, LICENSE)
+CONTRIBUTING.md
+.github-description.txt
+.github-topics.txt
+
+# Build artifacts
+out/**/*.map
+extension/webview/dist/**/*.map
+
+# Testing
+tests/**
+**/*.test.ts
+**/*.spec.ts
+coverage/**
+
+# Misc
+.DS_Store
+*.log
+*.vsix
+.eslintrc*
+.prettierrc*
+

@@ -1,0 +1,20 @@
+PROPRIETARY LICENSE
+
+Copyright © 2025 Valentin Galudec. All rights reserved.
+
+PROPRIETARY SOFTWARE - ALL RIGHTS RESERVED
+
+This software and associated documentation files (the "Software") are the 
+exclusive property of Valentin Galudec.
+
+Unauthorized copying, modification, distribution, or use of this Software, 
+via any medium, is strictly prohibited without the express written permission 
+of Valentin Galudec.
+
+For licensing inquiries, please contact the owner.
+
+REASONING LAYER V3
+Technical Decision Intelligence System
+
+© 2025 Valentin Galudec. All rights reserved.
+

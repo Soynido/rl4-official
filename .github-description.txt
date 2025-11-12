@@ -1,0 +1,2 @@
+VS Code extension that transforms raw workspace metrics into actionable insights using LLM-validated KPIs. Never ask "What should I do next?" again.
+

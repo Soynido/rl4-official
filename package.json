@@ -1,0 +1,120 @@
+{
+  "name": "reasoning-layer-rl4",
+  "displayName": "Reasoning Layer RL4 (Kernel)",
+  "version": "2.7.0-adr-detection",
+  "publisher": "valentingaludec",
+  "author": {
+    "name": "Valentin Galudec",
+    "email": ""
+  },
+  "description": "RL4 Kernel - Append-only ledger, Merkle verification, autonomous cognitive scheduler with watchdog",
+  "license": "PROPRIETARY",
+  "copyright": "Copyright © 2025 Valentin Galudec. All rights reserved.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Soynido/reasoning-layer-v3.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "AI"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/.git",
+    "onStartupFinished"
+  ],
+  "main": "out/extension.js",
+  "bin": {
+    "rl3": ".reasoning/repl.js"
+  },
+  "contributes": {
+    "configuration": {
+      "title": "Reasoning Layer V3",
+      "properties": {
+        "reasoningLayer.githubToken": {
+          "type": "string",
+          "default": null,
+          "description": "GitHub Personal Access Token for PR and Issue integration",
+          "scope": "window"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "reasoning.kernel.status",
+        "title": "📊 Kernel Status",
+        "category": "RL4 Kernel"
+      },
+      {
+        "command": "reasoning.kernel.reflect",
+        "title": "🧠 Run Cognitive Cycle",
+        "category": "RL4 Kernel"
+      },
+      {
+        "command": "reasoning.kernel.flush",
+        "title": "💾 Flush All Queues",
+        "category": "RL4 Kernel"
+      },
+      {
+        "command": "reasoning.kernel.whereami",
+        "title": "🧠 Where Am I? — Cognitive Snapshot",
+        "category": "RL4 Kernel"
+      },
+      {
+        "command": "reasoning.adr.reviewPending",
+        "title": "📋 Review Pending ADRs",
+        "category": "RL4 ADR"
+      },
+      {
+        "command": "reasoning.adr.acceptProposal",
+        "title": "✅ Accept ADR Proposal",
+        "category": "RL4 ADR"
+      },
+      {
+        "command": "reasoning.adr.rejectProposal",
+        "title": "❌ Reject ADR Proposal",
+        "category": "RL4 ADR"
+      },
+      {
+        "command": "rl4.toggleWebview",
+        "title": "🖥️ Show Dashboard",
+        "category": "RL4 Kernel"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "webpack --mode production",
+    "watch": "webpack --mode development --watch",
+    "build": "webpack --mode production",
+    "dev": "webpack --mode development --watch",
+    "test": "jest",
+    "test:whereami": "ts-node tests/whereami-snapshot.test.ts",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "rl4:init-cache": "ts-node scripts/init-rl4-cache.ts",
+    "rl4:rebuild-index": "ts-node scripts/rebuild-rl4-index.ts",
+    "rl4:validate-runtime": "ts-node scripts/validate-rl4-runtime.ts"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "simple-git": "^3.28.0",
+    "uuid": "^9.0.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^18.0.0",
+    "@types/uuid": "^10.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.32.0",
+    "jest": "^29.0.0",
+    "ts-loader": "^9.5.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  }
+}

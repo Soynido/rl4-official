@@ -1,0 +1,15 @@
+vscode-extension
+developer-tools
+llm
+cognitive-load
+workspace-insights
+productivity
+developer-experience
+typescript
+react
+ai-powered
+context-awareness
+decision-tracking
+adr
+dev-continuity
+

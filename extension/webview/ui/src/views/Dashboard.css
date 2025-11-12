@@ -1,0 +1,84 @@
+.dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.dashboard h1 {
+  margin-bottom: 30px;
+  color: #fff;
+}
+
+.health-indicators {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.health-card {
+  background: #252526;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #333;
+}
+
+.health-card h3 {
+  margin-top: 0;
+  color: #4ec9b0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.metric {
+  font-size: 32px;
+  font-weight: bold;
+  color: #fff;
+  margin: 10px 0;
+}
+
+.breakdown {
+  font-size: 12px;
+  color: #888;
+}
+
+.active-goals {
+  background: #252526;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 30px;
+}
+
+.active-goals h2 {
+  margin-top: 0;
+  color: #4ec9b0;
+}
+
+.goal-list {
+  list-style: none;
+  padding: 0;
+}
+
+.quick-stats {
+  display: flex;
+  gap: 20px;
+}
+
+.stat-card {
+  flex: 1;
+  background: #252526;
+  padding: 20px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.stat-card h4 {
+  margin: 0 0 10px 0;
+  color: #888;
+  font-size: 14px;
+}
+
+.stat-value {
+  font-size: 36px;
+  font-weight: bold;
+  color: #fff;
+}

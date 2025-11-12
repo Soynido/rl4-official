@@ -1,0 +1,163 @@
+/**
+ * RL4 Cognitive OS - Neural Cockpit Design System
+ * Minimalisme fonctionnel + profondeur sensorielle
+ * Glow violet, accent turquoise, micro-animations vivantes
+ */
+
+:root {
+  /* === Core Colors === */
+  --rl4-dark: #0D1117;
+  --rl4-darker: #181625;
+  --rl4-surface: rgba(24, 22, 37, 0.85);
+  --rl4-surface-light: rgba(24, 22, 37, 0.95);
+  --rl4-light: #EEF2FB;
+
+  /* === Neural Palette === */
+  --rl4-violet: #8920FE;
+  --rl4-violet-alt: #7C30FA;
+  --rl4-violet-bright: #9D4CFF;
+  --rl4-magenta: #F8007C;
+  --rl4-magenta-alt: #BB2CFF;
+  --rl4-turquoise: #16F7B5;
+  --rl4-turquoise-alt: #38FFDB;
+  --rl4-turquoise-bright: #5DFFE7;
+
+  /* === Gradient Library === */
+  --rl4-gradient-primary: linear-gradient(135deg, #8920FE 0%, #16F7B5 100%);
+  --rl4-gradient-secondary: linear-gradient(135deg, #7C30FA 0%, #BB2CFF 100%);
+  --rl4-gradient-cognitive: linear-gradient(135deg, #1F1A2C 0%, #2D2541 40%, #181625 100%);
+  --rl4-gradient-hero: linear-gradient(135deg, rgba(137, 32, 254, 0.1) 0%, rgba(22, 247, 181, 0.05) 100%);
+  --rl4-gradient-surface: linear-gradient(135deg, rgba(24, 22, 37, 0.8) 0%, rgba(13, 17, 23, 0.9) 100%);
+  --rl4-gradient-live: linear-gradient(135deg, #8920FE 0%, #F8007C 50%, #16F7B5 100%);
+
+  /* === Typography System === */
+  --rl4-text-primary: #EEF2FB;
+  --rl4-text-secondary: #B9B8C6;
+  --rl4-text-muted: #6B6978;
+  --rl4-text-dim: #3A3847;
+
+  /* === Semantic Colors === */
+  --rl4-success: #16F7B5;
+  --rl4-success-alt: #38FFDB;
+  --rl4-warning: #FFB347;
+  --rl4-warning-alt: #FFC947;
+  --rl4-error: #F8007C;
+  --rl4-error-alt: #FF4D9D;
+  --rl4-info: #38FFDB;
+  --rl4-info-alt: #5DFFE7;
+
+  /* === Advanced Shadows & Glows === */
+  --rl4-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --rl4-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --rl4-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --rl4-shadow-xl: 0 16px 64px rgba(0, 0, 0, 0.6);
+  --rl4-shadow-glow: 0 0 24px rgba(137, 32, 254, 0.4);
+
+  /* === Neural Glow System === */
+  --rl4-glow-violet: 0 0 12px rgba(137, 32, 254, 0.5);
+  --rl4-glow-violet-medium: 0 0 16px rgba(137, 32, 254, 0.7);
+  --rl4-glow-violet-strong: 0 0 24px rgba(137, 32, 254, 0.9);
+  --rl4-glow-turquoise: 0 0 12px rgba(22, 247, 181, 0.5);
+  --rl4-glow-turquoise-medium: 0 0 16px rgba(22, 247, 181, 0.7);
+  --rl4-glow-turquoise-strong: 0 0 24px rgba(22, 247, 181, 0.9);
+  --rl4-glow-magenta: 0 0 12px rgba(248, 0, 124, 0.5);
+  --rl4-glow-magenta-medium: 0 0 16px rgba(248, 0, 124, 0.7);
+  --rl4-glow-live: 0 0 20px rgba(137, 32, 254, 0.8);
+  --rl4-glow-cognitive: 0 0 32px rgba(137, 32, 254, 0.3);
+  --rl4-glow-active: 0 0 28px rgba(22, 247, 181, 0.6);
+
+  /* === Border System === */
+  --rl4-border-subtle: 1px solid rgba(137, 32, 254, 0.15);
+  --rl4-border-medium: 1px solid rgba(137, 32, 254, 0.3);
+  --rl4-border-strong: 1px solid rgba(137, 32, 254, 0.5);
+  --rl4-border-turquoise: 1px solid rgba(22, 247, 181, 0.3);
+  --rl4-border-magenta: 1px solid rgba(248, 0, 124, 0.3);
+
+  /* === Spacing Scale === */
+  --rl4-space-xs: 0.25rem;
+  --rl4-space-sm: 0.5rem;
+  --rl4-space-md: 1rem;
+  --rl4-space-lg: 1.5rem;
+  --rl4-space-xl: 2rem;
+  --rl4-space-2xl: 3rem;
+  --rl4-space-3xl: 4rem;
+  --rl4-space-4xl: 6rem;
+
+  /* === Radius System === */
+  --rl4-radius-xs: 4px;
+  --rl4-radius-sm: 6px;
+  --rl4-radius-md: 8px;
+  --rl4-radius-lg: 12px;
+  --rl4-radius-xl: 16px;
+  --rl4-radius-2xl: 20px;
+  --rl4-radius-3xl: 24px;
+  --rl4-radius-full: 999px;
+  --rl4-radius-pill: 50px;
+
+  /* === Typography === */
+  --rl4-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --rl4-font-mono: 'JetBrains Mono', 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  --rl4-font-display: 'Inter Display', 'Inter', sans-serif;
+
+  --rl4-font-xs: 0.75rem;
+  --rl4-font-sm: 0.875rem;
+  --rl4-font-base: 1rem;
+  --rl4-font-lg: 1.125rem;
+  --rl4-font-xl: 1.25rem;
+  --rl4-font-2xl: 1.5rem;
+  --rl4-font-3xl: 1.875rem;
+  --rl4-font-4xl: 2.25rem;
+  --rl4-font-5xl: 3rem;
+
+  --rl4-font-weight-thin: 100;
+  --rl4-font-weight-light: 300;
+  --rl4-font-weight-normal: 400;
+  --rl4-font-weight-medium: 500;
+  --rl4-font-weight-semibold: 600;
+  --rl4-font-weight-bold: 700;
+  --rl4-font-weight-extrabold: 800;
+  --rl4-font-weight-black: 900;
+
+  --rl4-line-height-tight: 1.25;
+  --rl4-line-height-normal: 1.5;
+  --rl4-line-height-relaxed: 1.625;
+
+  /* === Transitions === */
+  --rl4-transition-instant: 0.08s ease;
+  --rl4-transition-fast: 0.15s ease;
+  --rl4-transition-base: 0.25s ease;
+  --rl4-transition-slow: 0.35s ease;
+  --rl4-transition-epic: 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  --rl4-transition-bounce: 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* === Backdrop Effects === */
+  --rl4-backdrop-blur: blur(8px);
+  --rl4-backdrop-blur-medium: blur(12px);
+  --rl4-backdrop-blur-strong: blur(20px);
+  --rl4-backdrop-blur-max: blur(32px);
+
+  /* === Z-Index Stack === */
+  --rl4-z-base: 0;
+  --rl4-z-raised: 10;
+  --rl4-z-dropdown: 100;
+  --rl4-z-sticky: 200;
+  --rl4-z-modal: 300;
+  --rl4-z-popover: 400;
+  --rl4-z-tooltip: 500;
+  --rl4-z-toast: 600;
+
+  /* === Component Heights === */
+  --rl4-header-height: 72px;
+  --rl4-navigation-height: 60px;
+  --rl4-footer-height: 48px;
+
+  /* === Neural Animation Variables === */
+  --rl4-pulse-speed: 2s;
+  --rl4-breathe-speed: 4s;
+  --rl4-glow-pulse: 3s;
+  --rl4-neural-flicker: 0.8s;
+
+  /* === Additional Variables for Components === */
+  --rl4-gradient-button: linear-gradient(135deg, #8920FE 0%, #BB2CFF 100%);
+}
+

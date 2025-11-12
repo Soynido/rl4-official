@@ -1,0 +1,239 @@
+/**
+ * RL4 Cognitive OS - Components
+ * Tabs, Buttons, Cards, Badges
+ */
+
+/* === Tabs === */
+.rl4-tab {
+  border-radius: var(--rl4-radius-lg);
+  padding: 0.6rem 1.2rem;
+  color: var(--rl4-text-primary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: var(--rl4-font-sm);
+  font-weight: var(--rl4-font-weight-medium);
+  transition: all var(--rl4-transition-base);
+  position: relative;
+}
+
+.rl4-tab:hover {
+  background: rgba(22, 247, 181, 0.1);
+  box-shadow: var(--rl4-glow-turquoise);
+}
+
+.rl4-tab--active {
+  background: var(--rl4-gradient-primary);
+  box-shadow: var(--rl4-glow-live);
+}
+
+.rl4-tab--active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  background: var(--rl4-turquoise);
+  box-shadow: 0 0 8px var(--rl4-turquoise);
+}
+
+/* === Buttons === */
+.rl4-btn {
+  border-radius: var(--rl4-radius-md);
+  padding: 0.7rem 1.4rem;
+  font-size: var(--rl4-font-base);
+  font-weight: var(--rl4-font-weight-medium);
+  border: none;
+  cursor: pointer;
+  transition: all var(--rl4-transition-base);
+  font-family: var(--rl4-font-sans);
+}
+
+.rl4-btn--primary {
+  background: var(--rl4-gradient-button);
+  color: white;
+  box-shadow: var(--rl4-glow-violet);
+}
+
+.rl4-btn--primary:hover {
+  transform: scale(1.03);
+  box-shadow: var(--rl4-glow-violet-strong);
+}
+
+.rl4-btn--primary:active {
+  transform: scale(0.98);
+}
+
+.rl4-btn--secondary {
+  background: rgba(137, 32, 254, 0.15);
+  color: var(--rl4-violet);
+  border: 1px solid var(--rl4-violet);
+}
+
+.rl4-btn--secondary:hover {
+  background: rgba(137, 32, 254, 0.25);
+  box-shadow: var(--rl4-glow-violet);
+}
+
+.rl4-btn--ghost {
+  background: transparent;
+  color: var(--rl4-text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.rl4-btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--rl4-violet);
+  color: var(--rl4-violet);
+}
+
+.rl4-btn--icon {
+  padding: 0.5rem;
+  border-radius: var(--rl4-radius-sm);
+}
+
+/* === Cards === */
+.rl4-card {
+  background: var(--rl4-surface);
+  backdrop-filter: var(--rl4-backdrop-blur);
+  border-radius: var(--rl4-radius-lg);
+  padding: var(--rl4-space-lg);
+  border: var(--rl4-border-subtle);
+  transition: all var(--rl4-transition-base);
+}
+
+.rl4-card:hover {
+  border-color: rgba(137, 32, 254, 0.4);
+  box-shadow: var(--rl4-glow-violet);
+  transform: translateY(-2px);
+}
+
+.rl4-card--glow {
+  box-shadow: var(--rl4-glow-violet);
+}
+
+.rl4-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--rl4-space-md);
+}
+
+.rl4-card__title {
+  font-size: var(--rl4-font-lg);
+  font-weight: var(--rl4-font-weight-semibold);
+  color: var(--rl4-text-primary);
+}
+
+.rl4-card__body {
+  color: var(--rl4-text-secondary);
+}
+
+/* === Stat Card === */
+.rl4-stat-card {
+  background: var(--rl4-darker);
+  border-radius: var(--rl4-radius-lg);
+  padding: var(--rl4-space-lg);
+  border: var(--rl4-border-subtle);
+  text-align: center;
+  transition: all var(--rl4-transition-base);
+}
+
+.rl4-stat-card:hover {
+  box-shadow: var(--rl4-glow-violet);
+  transform: translateY(-4px);
+}
+
+.rl4-stat-card__label {
+  font-size: var(--rl4-font-sm);
+  color: var(--rl4-text-muted);
+  margin-bottom: var(--rl4-space-sm);
+}
+
+.rl4-stat-card__value {
+  font-size: var(--rl4-font-3xl);
+  font-weight: var(--rl4-font-weight-bold);
+  background: var(--rl4-gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.rl4-stat-card__meta {
+  font-size: var(--rl4-font-xs);
+  color: var(--rl4-text-muted);
+  margin-top: var(--rl4-space-sm);
+}
+
+/* === Badges === */
+.rl4-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rl4-space-xs);
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--rl4-radius-full);
+  font-size: var(--rl4-font-xs);
+  font-weight: var(--rl4-font-weight-medium);
+}
+
+.rl4-badge--live {
+  background: var(--rl4-violet);
+  color: white;
+  box-shadow: var(--rl4-glow-live);
+}
+
+.rl4-badge--success {
+  background: rgba(22, 247, 181, 0.2);
+  color: var(--rl4-success);
+  border: 1px solid var(--rl4-success);
+}
+
+.rl4-badge--warning {
+  background: rgba(255, 179, 71, 0.2);
+  color: var(--rl4-warning);
+  border: 1px solid var(--rl4-warning);
+}
+
+.rl4-badge--error {
+  background: rgba(248, 0, 124, 0.2);
+  color: var(--rl4-error);
+  border: 1px solid var(--rl4-error);
+}
+
+/* === Progress Bar === */
+.rl4-progress {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: var(--rl4-radius-full);
+  overflow: hidden;
+}
+
+.rl4-progress__fill {
+  height: 100%;
+  background: var(--rl4-gradient-primary);
+  border-radius: var(--rl4-radius-full);
+  transition: width var(--rl4-transition-slow);
+  box-shadow: 0 0 8px var(--rl4-turquoise);
+}
+
+/* === Code Block === */
+.rl4-code {
+  background: var(--rl4-dark);
+  border: var(--rl4-border-subtle);
+  border-radius: var(--rl4-radius-md);
+  padding: var(--rl4-space-md);
+  font-family: var(--rl4-font-mono);
+  font-size: var(--rl4-font-sm);
+  color: var(--rl4-text-primary);
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+/* === Divider === */
+.rl4-divider {
+  height: 1px;
+  background: var(--rl4-border-subtle);
+  margin: var(--rl4-space-lg) 0;
+}
+

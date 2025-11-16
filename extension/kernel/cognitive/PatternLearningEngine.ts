@@ -27,57 +27,85 @@ export class PatternLearningEngine {
 
     /**
      * Analyze ledger and extract patterns
+     * AUTO-LEARNING: Loads existing patterns (potentially improved by LLM) and builds upon them
      */
     public async analyzePatterns(): Promise<DecisionPattern[]> {
+        // AUTO-LEARNING: Load existing patterns (may have been improved by LLM)
+        const existingPatterns = this.loadPatterns();
+        const existingPatternIds = new Set(existingPatterns.map(p => p.id));
+        
         // Load all ledger entries
         const entries = await this.loadAllLedgerEntries();
         
-        // Analyze for patterns
-        const patterns: DecisionPattern[] = [];
+        // Analyze for NEW patterns (only detect patterns not already in existingPatterns)
+        const newPatterns: DecisionPattern[] = [];
 
         // Pattern 1: Incident + Feedback → Config Update ADR
         const incidentFeedbackPattern = this.detectIncidentFeedbackPattern(entries);
-        if (incidentFeedbackPattern) patterns.push(incidentFeedbackPattern);
+        if (incidentFeedbackPattern && !existingPatternIds.has(incidentFeedbackPattern.id)) {
+            newPatterns.push(incidentFeedbackPattern);
+        }
 
         // Pattern 2: Refactor Decisions → Reduced Incidents
         const refactorPattern = this.detectRefactorPattern(entries);
-        if (refactorPattern) patterns.push(refactorPattern);
+        if (refactorPattern && !existingPatternIds.has(refactorPattern.id)) {
+            newPatterns.push(refactorPattern);
+        }
 
         // Pattern 3: Market Trend → Tech Migration
         const migrationPattern = this.detectMigrationPattern(entries);
-        if (migrationPattern) patterns.push(migrationPattern);
+        if (migrationPattern && !existingPatternIds.has(migrationPattern.id)) {
+            newPatterns.push(migrationPattern);
+        }
 
         // Pattern 4: Performance Issues → Cache Decisions
         const cachePattern = this.detectCachePerformancePattern(entries);
-        if (cachePattern) patterns.push(cachePattern);
+        if (cachePattern && !existingPatternIds.has(cachePattern.id)) {
+            newPatterns.push(cachePattern);
+        }
 
         // Pattern 5: Compliance Requirements → Security ADRs
         const compliancePattern = this.detectCompliancePattern(entries);
-        if (compliancePattern) patterns.push(compliancePattern);
+        if (compliancePattern && !existingPatternIds.has(compliancePattern.id)) {
+            newPatterns.push(compliancePattern);
+        }
 
         // === GIT-BASED PATTERNS (from commit history) ===
         
         // Pattern 6: Kernel Evolution (frequent kernel commits)
         const kernelPattern = this.detectKernelEvolutionPattern(entries);
-        if (kernelPattern) patterns.push(kernelPattern);
+        if (kernelPattern && !existingPatternIds.has(kernelPattern.id)) {
+            newPatterns.push(kernelPattern);
+        }
 
         // Pattern 7: Fix Cycles (repeated fixes)
         const fixCyclePattern = this.detectFixCyclePattern(entries);
-        if (fixCyclePattern) patterns.push(fixCyclePattern);
+        if (fixCyclePattern && !existingPatternIds.has(fixCyclePattern.id)) {
+            newPatterns.push(fixCyclePattern);
+        }
 
         // Pattern 8: Feature Development Velocity
         const featureVelocityPattern = this.detectFeatureVelocityPattern(entries);
-        if (featureVelocityPattern) patterns.push(featureVelocityPattern);
+        if (featureVelocityPattern && !existingPatternIds.has(featureVelocityPattern.id)) {
+            newPatterns.push(featureVelocityPattern);
+        }
 
         // Pattern 9: Refactor Decisions
         const refactorDecisionPattern = this.detectRefactorDecisionPattern(entries);
-        if (refactorDecisionPattern) patterns.push(refactorDecisionPattern);
+        if (refactorDecisionPattern && !existingPatternIds.has(refactorDecisionPattern.id)) {
+            newPatterns.push(refactorDecisionPattern);
+        }
+
+        // AUTO-LEARNING: Merge existing patterns (potentially improved by LLM) with new patterns
+        const allPatterns = [...existingPatterns, ...newPatterns];
 
         // OPTIMIZATION: Apply diversity penalty before saving
-        const diversifiedPatterns = this.applyDiversityPenalty(patterns);
+        const diversifiedPatterns = this.applyDiversityPenalty(allPatterns);
         
-        // Save patterns
+        // Save patterns (preserving LLM improvements)
         await this.savePatterns(diversifiedPatterns);
+
+        console.log(`🧠 PatternLearningEngine: ${existingPatterns.length} existing patterns (preserved) + ${newPatterns.length} new patterns = ${diversifiedPatterns.length} total`);
 
         return diversifiedPatterns;
     }
@@ -197,11 +225,24 @@ export class PatternLearningEngine {
     private async loadAllLedgerEntries(): Promise<LedgerEntry[]> {
         const entries: LedgerEntry[] = [];
 
+        // Filter out Git conflict markers
+        const isGitConflictMarker = (line: string): boolean => {
+            const trimmed = line.trim();
+            return trimmed.startsWith('<<<<<<<') || 
+                   trimmed.startsWith('=======') || 
+                   trimmed.startsWith('>>>>>>>') ||
+                   trimmed.includes('<<<<<<< Updated upstream') ||
+                   trimmed.includes('>>>>>>> Stashed changes');
+        };
+
         // Load main ledger
         const mainLedger = path.join(this.workspaceRoot, '.reasoning_rl4', 'ledger', 'rbom_ledger.jsonl');
         if (fs.existsSync(mainLedger)) {
             const lines = fs.readFileSync(mainLedger, 'utf-8').split('\n').filter(Boolean);
             for (const line of lines) {
+                if (isGitConflictMarker(line)) {
+                    continue; // Skip Git conflict markers
+                }
                 try {
                     entries.push(JSON.parse(line));
                 } catch (error) {
@@ -215,6 +256,9 @@ export class PatternLearningEngine {
         if (fs.existsSync(externalLedger)) {
             const lines = fs.readFileSync(externalLedger, 'utf-8').split('\n').filter(Boolean);
             for (const line of lines) {
+                if (isGitConflictMarker(line)) {
+                    continue; // Skip Git conflict markers
+                }
                 try {
                     const ev = JSON.parse(line);
                     entries.push({

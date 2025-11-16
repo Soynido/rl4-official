@@ -130,14 +130,30 @@ export class AppendOnlyWriter {
         const content = await fs.readFile(this.filePath, 'utf-8');
         const lines = content.trim().split('\n').filter(l => l);
         
-        return lines.map(line => {
+        // Filter out Git conflict markers
+        const isGitConflictMarker = (line: string): boolean => {
+            const trimmed = line.trim();
+            return trimmed.startsWith('<<<<<<<') || 
+                   trimmed.startsWith('=======') || 
+                   trimmed.startsWith('>>>>>>>') ||
+                   trimmed.includes('<<<<<<< Updated upstream') ||
+                   trimmed.includes('>>>>>>> Stashed changes');
+        };
+        
+        return lines
+            .filter(line => !isGitConflictMarker(line)) // Remove Git conflict markers
+            .map(line => {
             try {
                 return JSON.parse(line);
             } catch (error) {
+                    // Only warn if it's not a Git conflict marker (already filtered)
+                    if (!isGitConflictMarker(line)) {
                 console.warn(`⚠️ Invalid JSONL line: ${line.substring(0, 50)}...`);
+                    }
                 return null;
             }
-        }).filter(e => e !== null);
+            })
+            .filter(e => e !== null);
     }
     
     /**

@@ -181,22 +181,33 @@ export class ForecastEngine {
 
         console.log(`🎯 ${forecasts.length} forecasts generated (${decisionForecasts} decision, ${riskForecasts} risk, ${opportunityForecasts} opportunity)`);
 
-        // Apply deduplication
-        const dedupedForecasts = this.deduplicateForecasts(forecasts);
-        console.log(`✅ Forecast deduplication applied (${dedupedForecasts.length} unique forecasts from ${forecasts.length} total).`);
+        // AUTO-LEARNING: Load existing forecasts (potentially improved by LLM)
+        const existingForecasts = await this.loadForecasts();
+        const existingForecastKeys = new Set(existingForecasts.map(f => this.getForecastKey(f)));
+        
+        // Filter out forecasts that already exist (preserve LLM improvements)
+        const trulyNewForecasts = forecasts.filter(f => !existingForecastKeys.has(this.getForecastKey(f)));
+        
+        // Apply deduplication on new forecasts only
+        const dedupedNewForecasts = this.deduplicateForecasts(trulyNewForecasts);
+        console.log(`✅ Forecast deduplication applied (${dedupedNewForecasts.length} unique new forecasts from ${trulyNewForecasts.length} total).`);
+
+        // AUTO-LEARNING: Merge existing forecasts (preserved) with new forecasts
+        const allForecasts = [...existingForecasts, ...dedupedNewForecasts];
+        console.log(`🧠 ForecastEngine: ${existingForecasts.length} existing forecasts (preserved) + ${dedupedNewForecasts.length} new forecasts = ${allForecasts.length} total`);
 
         // Save both raw and deduplicated forecasts for adaptive regulation
         await this.saveRawForecasts(forecasts);
         
-        // Save deduplicated forecasts
-        await this.saveForecasts(dedupedForecasts);
+        // Save merged forecasts (preserving LLM improvements)
+        await this.saveForecasts(allForecasts);
 
-        // Append to ledger
-        for (const forecast of dedupedForecasts) {
+        // Append only new forecasts to ledger
+        for (const forecast of dedupedNewForecasts) {
             await this.appendToLedger(forecast);
         }
 
-        return dedupedForecasts;
+        return allForecasts;
     }
 
     /**
@@ -484,6 +495,32 @@ export class ForecastEngine {
             );
         } catch (error) {
             console.error('Failed to save raw forecasts:', error);
+        }
+    }
+
+    /**
+     * Load existing forecasts (potentially improved by LLM)
+     * AUTO-LEARNING: Preserves LLM improvements across cycles
+     */
+    private async loadForecasts(): Promise<Forecast[]> {
+        try {
+            if (!fs.existsSync(this.forecastsPath)) {
+                return [];
+            }
+            const data = fs.readFileSync(this.forecastsPath, 'utf-8');
+            const parsed = JSON.parse(data);
+            
+            // Handle both direct array and object with forecasts property
+            if (Array.isArray(parsed)) {
+                return parsed;
+            } else if (parsed.forecasts && Array.isArray(parsed.forecasts)) {
+                return parsed.forecasts;
+            }
+            
+            return [];
+        } catch (error) {
+            console.error('Failed to load forecasts:', error);
+            return [];
         }
     }
 

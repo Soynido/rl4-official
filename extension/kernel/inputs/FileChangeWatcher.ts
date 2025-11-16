@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as chokidar from 'chokidar';
 import { v4 as uuidv4 } from 'uuid';
 import { AppendOnlyWriter } from '../AppendOnlyWriter';
-import * as vscode from 'vscode';
+import { CognitiveLogger, FileChangeSummary } from '../CognitiveLogger';
 
 // RL4 Minimal Types (shared with GitCommitListener)
 interface CaptureEvent {
@@ -13,32 +13,6 @@ interface CaptureEvent {
     source: string;
     metadata: any;
 }
-
-// RL4 Simple Logger
-class SimpleLogger {
-    private channel: vscode.OutputChannel | null = null;
-    
-    setChannel(channel: vscode.OutputChannel) {
-        this.channel = channel;
-    }
-    
-    log(message: string) {
-        if (this.channel) {
-            const timestamp = new Date().toISOString().substring(11, 23);
-            this.channel.appendLine(`[${timestamp}] ${message}`);
-        }
-    }
-    
-    warn(message: string) {
-        this.log(`⚠️ ${message}`);
-    }
-    
-    error(message: string) {
-        this.log(`❌ ${message}`);
-    }
-}
-
-const simpleLogger = new SimpleLogger();
 
 /**
  * FileChangeWatcher - Input Layer Component (Phase 2)
@@ -60,28 +34,87 @@ export class FileChangeWatcher {
     private changeBuffer: Map<string, FileChange> = new Map();
     private burstTimeout: NodeJS.Timeout | null = null;
     private appendWriter: AppendOnlyWriter | null = null;
-    private outputChannel: vscode.OutputChannel | null = null;
+    private cognitiveLogger: CognitiveLogger | null = null;
+    
+    // Aggregation timer (every 30 seconds)
+    private aggregationTimer: NodeJS.Timeout | null = null;
+    private lastAggregationTime: number = Date.now();
+    private aggregatedChanges: Map<string, { count: number; lastChange: FileChange }> = new Map();
 
-    constructor(workspaceRoot: string, appendWriter?: AppendOnlyWriter, outputChannel?: vscode.OutputChannel) {
+    constructor(workspaceRoot: string, appendWriter?: AppendOnlyWriter, cognitiveLogger?: CognitiveLogger) {
         this.workspaceRoot = workspaceRoot;
         this.appendWriter = appendWriter || null; // Optional append-only writer (RL4 mode)
-        this.outputChannel = outputChannel || null;
-        if (this.outputChannel) {
-            simpleLogger.setChannel(this.outputChannel);
-        }
+        this.cognitiveLogger = cognitiveLogger || null;
+        
+        // Start aggregation timer (every 30 seconds)
+        this.startAggregationTimer();
     }
 
+    /**
+     * Start aggregation timer (every 30 seconds)
+     */
+    private startAggregationTimer(): void {
+        if (this.aggregationTimer) {
+            clearInterval(this.aggregationTimer);
+        }
+        
+        this.aggregationTimer = setInterval(() => {
+            this.logAggregatedChanges();
+        }, 30000); // 30 seconds
+    }
+    
+    /**
+     * Log aggregated file changes (every 30 seconds)
+     */
+    private logAggregatedChanges(): void {
+        if (!this.cognitiveLogger || this.aggregatedChanges.size === 0) {
+            return;
+        }
+        
+        const files: string[] = [];
+        let totalEdits = 0;
+        let hotspot: { file: string; edits: number } | undefined;
+        
+        // Process aggregated changes
+        this.aggregatedChanges.forEach((agg, filePath) => {
+            files.push(filePath);
+            totalEdits += agg.count;
+            
+            if (!hotspot || agg.count > hotspot.edits) {
+                hotspot = { file: filePath, edits: agg.count };
+            }
+        });
+        
+        // Create summary
+        const summary: FileChangeSummary = {
+            period_seconds: 30,
+            files_modified: files.length,
+            total_edits: totalEdits,
+            files: files,
+            hotspot: hotspot
+        };
+        
+        // Log via CognitiveLogger
+        this.cognitiveLogger.logFileChangeAggregate(30, summary);
+        
+        // Clear aggregated changes
+        this.aggregatedChanges.clear();
+        this.lastAggregationTime = Date.now();
+    }
+    
     /**
      * Start watching for file changes
      */
     public async startWatching(): Promise<void> {
         if (this.isWatching) {
-            simpleLogger.warn('⚠️ FileChangeWatcher already watching.');
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.warning('⚠️ FileChangeWatcher already watching.');
+            }
             return;
         }
 
         this.isWatching = true;
-        simpleLogger.log('🎧 FileChangeWatcher started');
+        // Silent start (no log needed, transparency via aggregated logs)
 
         // Configure chokidar
         this.watcher = chokidar.watch('.', {
@@ -103,7 +136,7 @@ export class FileChangeWatcher {
             .on('unlink', (filePath) => this.onFileDeleted(filePath))
             .on('error', (error) => this.onError(error));
 
-        simpleLogger.log('✅ FileChangeWatcher watching workspace');
+        // Silent start (transparency via aggregated logs every 30s)
     }
 
     /**
@@ -115,7 +148,15 @@ export class FileChangeWatcher {
             this.watcher = null;
         }
         this.isWatching = false;
-        simpleLogger.log('🎧 FileChangeWatcher stopped');
+        
+        // Stop aggregation timer
+        if (this.aggregationTimer) {
+            clearInterval(this.aggregationTimer);
+            this.aggregationTimer = null;
+        }
+        
+        // Log final aggregated changes before stopping
+        this.logAggregatedChanges();
     }
 
     /**
@@ -146,8 +187,6 @@ export class FileChangeWatcher {
     private async onFileAdded(filePath: string): Promise<void> {
         const fullPath = path.join(this.workspaceRoot, filePath);
         
-        simpleLogger.log(`📝 File added: ${filePath}`);
-        
         const change: FileChange = {
             type: 'add',
             path: filePath,
@@ -165,8 +204,6 @@ export class FileChangeWatcher {
     private async onFileChanged(filePath: string): Promise<void> {
         const fullPath = path.join(this.workspaceRoot, filePath);
         
-        simpleLogger.log(`📝 File changed: ${filePath}`);
-        
         const change: FileChange = {
             type: 'change',
             path: filePath,
@@ -182,8 +219,6 @@ export class FileChangeWatcher {
      * Handle file deleted
      */
     private async onFileDeleted(filePath: string): Promise<void> {
-        simpleLogger.log(`📝 File deleted: ${filePath}`);
-        
         const change: FileChange = {
             type: 'delete',
             path: filePath,
@@ -199,14 +234,25 @@ export class FileChangeWatcher {
      * Handle errors
      */
     private onError(error: Error): void {
-        simpleLogger.warn(`⚠️ FileChangeWatcher error: ${error.message}`);
+        if (this.cognitiveLogger) {
+            this.cognitiveLogger.warning(`⚠️ FileChangeWatcher error: ${error.message}`);
+        }
     }
 
     /**
-     * Buffer changes to detect bursts
+     * Buffer changes to detect bursts + aggregate for logging
      */
     private bufferChange(filePath: string, change: FileChange): void {
         this.changeBuffer.set(filePath, change);
+        
+        // Aggregate for 30s logging
+        const existing = this.aggregatedChanges.get(filePath);
+        if (existing) {
+            existing.count++;
+            existing.lastChange = change;
+        } else {
+            this.aggregatedChanges.set(filePath, { count: 1, lastChange: change });
+        }
 
         // Clear existing timeout
         if (this.burstTimeout) {
@@ -228,7 +274,7 @@ export class FileChangeWatcher {
         const changes = Array.from(this.changeBuffer.values());
         const pattern = this.detectPattern(changes);
 
-        simpleLogger.log(`🔍 Detected pattern: ${pattern.type} (${changes.length} files)`);
+        // Silent pattern detection (transparency via aggregated logs every 30s)
 
         // Create capture event
         const event = this.createCaptureEvent(changes, pattern);
@@ -418,7 +464,7 @@ export class FileChangeWatcher {
         if (this.appendWriter) {
             await this.appendWriter.append(event);
             await this.appendWriter.flush(); // Force immediate write for critical events
-            simpleLogger.log(`💾 Event saved (RL4 append-only): ${event.type}`);
+            // Silent save (transparency via aggregated logs every 30s)
             return;
         }
         
@@ -442,7 +488,9 @@ export class FileChangeWatcher {
             try {
                 events = JSON.parse(fs.readFileSync(traceFile, 'utf-8'));
             } catch (error) {
-                simpleLogger.warn(`⚠️ Could not read trace file: ${error}`);
+                if (this.cognitiveLogger) {
+                    this.cognitiveLogger.warning(`⚠️ Could not read trace file: ${error}`);
+                }
             }
         }
 
@@ -451,7 +499,7 @@ export class FileChangeWatcher {
 
         // Save
         fs.writeFileSync(traceFile, JSON.stringify(events, null, 2));
-        simpleLogger.log(`💾 Event saved (RL3 array): ${event.type}`);
+        // Silent save (transparency via aggregated logs every 30s)
 
         // Update manifest
         await this.updateManifest();
@@ -471,7 +519,9 @@ export class FileChangeWatcher {
             manifest.lastCaptureAt = new Date().toISOString();
             fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
         } catch (error) {
-            simpleLogger.warn(`⚠️ Could not update manifest: ${error}`);
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.warning(`⚠️ Could not update manifest: ${error}`);
+            }
         }
     }
 

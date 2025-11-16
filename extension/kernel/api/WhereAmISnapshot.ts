@@ -183,15 +183,13 @@ export async function generateWhereAmI(root?: string): Promise<string> {
     const phaseDetector = new PhaseDetector(workspaceRoot);
     const detectedPhase = await phaseDetector.detectPhase();
     
+    // Detect critical modules from recent file changes (not hardcoded)
+    const criticalModules = detectCriticalModules(rl4Root);
+    
     snapshot.architecture = {
       projectName: path.basename(workspaceRoot),
       phase: detectedPhase,
-      criticalModules: [
-        'CognitiveScheduler',
-        'PatternLearningEngine',
-        'CorrelationEngine',
-        'ForecastEngine',
-      ],
+      criticalModules,  // Detected dynamically from actual development activity
     };
   } catch (error) {
     // Fallback if detection fails
@@ -212,8 +210,8 @@ export async function generateWhereAmI(root?: string): Promise<string> {
 function formatMarkdownSnapshot(snapshot: CognitiveSnapshot): string {
   const lines: string[] = [];
   
-  // Header
-  lines.push('# 🧠 Where Am I? — RL4 Cognitive Snapshot');
+  // Header - GENERIC, not RL4-specific
+  lines.push(`# 🧠 Where Am I? — ${snapshot.architecture?.projectName || 'Project'} Cognitive Snapshot`);
   lines.push('');
   lines.push(`**Generated at**: ${new Date().toLocaleString('fr-FR', { 
     dateStyle: 'full', 

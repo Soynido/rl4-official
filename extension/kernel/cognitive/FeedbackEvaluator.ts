@@ -307,10 +307,21 @@ export class FeedbackEvaluator {
             return [];
         }
 
+        // Filter out Git conflict markers
+        const isGitConflictMarker = (line: string): boolean => {
+            const trimmed = line.trim();
+            return trimmed.startsWith('<<<<<<<') || 
+                   trimmed.startsWith('=======') || 
+                   trimmed.startsWith('>>>>>>>') ||
+                   trimmed.includes('<<<<<<< Updated upstream') ||
+                   trimmed.includes('>>>>>>> Stashed changes');
+        };
+
         const content = fs.readFileSync(this.cyclesPath, 'utf-8');
         const lines = content.trim().split('\n').filter(l => l.trim());
         
         const cycles = lines
+            .filter(line => !isGitConflictMarker(line)) // Remove Git conflict markers
             .map(line => {
                 try {
                     return JSON.parse(line) as CycleEntry;

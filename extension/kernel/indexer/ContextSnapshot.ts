@@ -211,29 +211,31 @@ export class ContextSnapshotGenerator {
             return 'No cognitive context available yet. System is initializing.';
         }
         
+        // Get project name dynamically
+        const projectName = path.basename(this.workspaceRoot);
+        
         const files = ctx.files.length > 0 
             ? ctx.files.map(f => `\n  • ${f}`).join('')
             : '\n  (no recent file changes)';
         
-        return `You are the development assistant helping reconstruct reasoning.
+        return `You are the development assistant for the **${projectName}** project.
 
-Context from RL4 Kernel (${new Date(ctx.last_updated).toLocaleString()}):
+Context snapshot (${new Date(ctx.last_updated).toLocaleString()}):
 
 - Focus files: ${files}
 
 - Active pattern: ${ctx.pattern}
-  Impact: ${ctx.pattern ? 'Stability' : 'N/A'} | Confidence: ${(ctx.pattern_confidence * 100).toFixed(0)}%
+  Impact: ${ctx.pattern ? 'Detected' : 'N/A'} | Confidence: ${(ctx.pattern_confidence * 100).toFixed(0)}%
 
 - Forecast: "${ctx.forecast}"
-  Confidence: ${(ctx.forecast_confidence * 100).toFixed(0)}%${ctx.forecast ? ' | Timeframe: H2 2026' : ''}
+  Confidence: ${(ctx.forecast_confidence * 100).toFixed(0)}%${ctx.forecast ? ' | Suggested timeframe: Soon' : ''}
 
-- Recent intent: ${ctx.intent}
-  Type: ${ctx.intent}${ctx.adr ? `\n\n- ADR: "${ctx.adr}" (accepted)` : ''}
+- Recent activity type: ${ctx.intent}${ctx.adr ? `\n\n- Decision documented: "${ctx.adr}" (accepted)` : ''}
 
 Your mission:
-1. Analyze the focus files for ${ctx.pattern ? ctx.pattern.toLowerCase() : 'patterns'}.
-2. ${ctx.pattern ? `Explain why this pattern emerged (${(ctx.pattern_confidence * 100).toFixed(0)}% confidence).` : 'Help understand the current development context.'}
-3. ${ctx.forecast ? `Suggest next steps aligned with the forecast: "${ctx.forecast}".` : 'Provide guidance on next development steps.'}`;
+1. Analyze the focus files in the context of **${projectName}** architecture.
+2. ${ctx.pattern ? `Explain why this development pattern emerged (${(ctx.pattern_confidence * 100).toFixed(0)}% confidence).` : 'Help understand the current development context.'}
+3. ${ctx.forecast ? `Suggest next steps for **${projectName}** aligned with: "${ctx.forecast}".` : 'Provide guidance on next development steps for this project.'}`;
     }
 }
 

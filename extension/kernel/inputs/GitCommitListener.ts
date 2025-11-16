@@ -3,6 +3,7 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { ExecPool } from '../ExecPool';
 import { AppendOnlyWriter } from '../AppendOnlyWriter';
+import { CognitiveLogger, CommitEvent } from '../CognitiveLogger';
 import * as vscode from 'vscode';
 
 // RL4 Minimal Types
@@ -13,32 +14,6 @@ interface CaptureEvent {
     source: string;
     metadata: any;
 }
-
-// RL4 Simple Logger
-class SimpleLogger {
-    private channel: vscode.OutputChannel | null = null;
-    
-    setChannel(channel: vscode.OutputChannel) {
-        this.channel = channel;
-    }
-    
-    log(message: string) {
-        if (this.channel) {
-            const timestamp = new Date().toISOString().substring(11, 23);
-            this.channel.appendLine(`[${timestamp}] ${message}`);
-        }
-    }
-    
-    warn(message: string) {
-        this.log(`⚠️ ${message}`);
-    }
-    
-    error(message: string) {
-        this.log(`❌ ${message}`);
-    }
-}
-
-const simpleLogger = new SimpleLogger();
 
 /**
  * GitCommitListener - Input Layer Component
@@ -59,17 +34,16 @@ export class GitCommitListener {
     private lastCommitHash: string = '';
     private execPool: ExecPool;
     private appendWriter: AppendOnlyWriter | null = null;
-    private outputChannel: vscode.OutputChannel | null = null;
+    private cognitiveLogger: CognitiveLogger | null = null;
+    private commitCountIncrementCallback: (() => void) | null = null;
 
-    constructor(workspaceRoot: string, execPool?: ExecPool, appendWriter?: AppendOnlyWriter, outputChannel?: vscode.OutputChannel) {
+    constructor(workspaceRoot: string, execPool?: ExecPool, appendWriter?: AppendOnlyWriter, cognitiveLogger?: CognitiveLogger, commitCountIncrementCallback?: () => void) {
         this.workspaceRoot = workspaceRoot;
         this.gitDir = path.join(workspaceRoot, '.git');
         this.execPool = execPool || new ExecPool(2, 2000); // Default pool
         this.appendWriter = appendWriter || null; // Optional append-only writer (RL4 mode)
-        this.outputChannel = outputChannel || null;
-        if (this.outputChannel) {
-            simpleLogger.setChannel(this.outputChannel);
-        }
+        this.cognitiveLogger = cognitiveLogger || null;
+        this.commitCountIncrementCallback = commitCountIncrementCallback || null;
     }
 
     /**
@@ -85,17 +59,21 @@ export class GitCommitListener {
      */
     public async startWatching(): Promise<void> {
         if (!this.isGitRepository()) {
-            simpleLogger.warn('⚠️ Not a git repository. GitCommitListener disabled.');
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.warning('Not a git repository. GitCommitListener disabled.');
+            }
             return;
         }
 
         if (this.isWatching) {
-            simpleLogger.warn('⚠️ GitCommitListener already watching.');
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.warning('GitCommitListener already watching.');
+            }
             return;
         }
 
         this.isWatching = true;
-        simpleLogger.log('🎧 GitCommitListener started');
+        // Silent start (transparency via commit capture logs)
 
         // Get current HEAD to avoid re-processing on start
         try {
@@ -118,7 +96,7 @@ export class GitCommitListener {
      */
     public stopWatching(): void {
         this.isWatching = false;
-        simpleLogger.log('🎧 GitCommitListener stopped');
+        // Silent stop (transparency via commit capture logs)
     }
 
     /**
@@ -127,14 +105,14 @@ export class GitCommitListener {
     private async installGitHook(): Promise<void> {
         const hookPath = path.join(this.gitDir, 'hooks', 'post-commit');
         const hookContent = `#!/bin/sh
-# Reasoning Layer V3 - Commit Listener Hook
+# Reasoning Layer RL4 - Commit Listener Hook
 # Auto-installed by GitCommitListener
 
-# Trigger RL3 commit capture
-echo "🎧 RL3: Capturing commit..."
+# Trigger RL4 commit capture
+echo "🎧 RL4: Capturing commit..."
 
 # Touch a marker file to trigger polling
-touch "${this.gitDir}/.rl3-commit-marker"
+touch "${this.gitDir}/.rl4-commit-marker"
 
 exit 0
 `;
@@ -150,16 +128,18 @@ exit 0
             if (fs.existsSync(hookPath)) {
                 const existing = fs.readFileSync(hookPath, 'utf-8');
                 if (existing.includes('Reasoning Layer V3')) {
-                    simpleLogger.log('✅ Git hook already installed');
+                    // Hook already installed, silent
                     return;
                 }
             }
 
             // Write hook
             fs.writeFileSync(hookPath, hookContent, { mode: 0o755 });
-            simpleLogger.log('✅ Git post-commit hook installed');
+            // Silent hook installation (transparency via commit capture logs)
         } catch (error) {
-            simpleLogger.warn(`⚠️ Could not install git hook: ${error}`);
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.warning(`Could not install git hook: ${error}`);
+            }
         }
     }
 
@@ -175,7 +155,7 @@ exit 0
             const currentHash = result.stdout.trim();
 
             // Check for marker file from hook OR hash change
-            const markerPath = path.join(this.gitDir, '.rl3-commit-marker');
+            const markerPath = path.join(this.gitDir, '.rl4-commit-marker');
             const markerExists = fs.existsSync(markerPath);
             
             if (markerExists) {
@@ -199,22 +179,46 @@ exit 0
 
     /**
      * Handle commit detection
+     * Phase 3: Uses CognitiveLogger.logCommitCapture() for transparency
      */
     private async onCommitDetected(): Promise<void> {
         try {
             const context = await this.captureContext(this.lastCommitHash);
             
-            simpleLogger.log(`🎧 Commit detected: ${context.message.substring(0, 50)}...`);
+            // Convert CommitContext to CommitEvent for CognitiveLogger
+            const commitEvent: CommitEvent = {
+                hash: context.hash,
+                message: context.message,
+                author: context.author,
+                files_changed: context.filesChanged.length,
+                insertions: context.insertions,
+                deletions: context.deletions,
+                intent: {
+                    type: context.intent.type,
+                    keywords: context.intent.keywords || []
+                },
+                timestamp: context.timestamp
+            };
+            
+            // Log commit capture via CognitiveLogger (transparency)
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.logCommitCapture(commitEvent);
+            }
+            
+            // Increment commit counter for hourly summary
+            if (this.commitCountIncrementCallback) {
+                this.commitCountIncrementCallback();
+            }
             
             // Create capture event
             const event = this.createCaptureEvent(context);
             
             // Save to traces
             await this.saveToTraces(event);
-            
-            simpleLogger.log(`✅ Commit captured: ${context.hash.substring(0, 7)}`);
         } catch (error) {
-            simpleLogger.warn(`⚠️ Failed to capture commit: ${error}`);
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.warning(`Failed to capture commit: ${error}`);
+            }
         }
     }
 
@@ -277,7 +281,9 @@ exit 0
             context.intent = this.parseIntent(context.message);
 
         } catch (error) {
-            simpleLogger.warn(`⚠️ Error capturing commit context: ${error}`);
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.warning(`Error capturing commit context: ${error}`);
+            }
         }
 
         return context;
@@ -380,7 +386,7 @@ exit 0
         if (this.appendWriter) {
             await this.appendWriter.append(event);
             await this.appendWriter.flush(); // Force immediate write for critical events
-            simpleLogger.log(`💾 Event saved (RL4 append-only): ${event.type}`);
+            // Silent (transparency via commit capture logs)
             return;
         }
         
@@ -404,7 +410,9 @@ exit 0
             try {
                 events = JSON.parse(fs.readFileSync(traceFile, 'utf-8'));
             } catch (error) {
-                simpleLogger.warn(`⚠️ Could not read trace file: ${error}`);
+                if (this.cognitiveLogger) {
+                    this.cognitiveLogger.warning(`Could not read trace file: ${error}`);
+                }
             }
         }
 
@@ -413,7 +421,7 @@ exit 0
 
         // Save
         fs.writeFileSync(traceFile, JSON.stringify(events, null, 2));
-        simpleLogger.log(`💾 Event saved (RL3 array): ${event.type}`);
+        // Silent (transparency via commit capture logs)
 
         // Update manifest
         await this.updateManifest();
@@ -433,7 +441,9 @@ exit 0
             manifest.lastCaptureAt = new Date().toISOString();
             fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
         } catch (error) {
-            simpleLogger.warn(`⚠️ Could not update manifest: ${error}`);
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.warning(`Could not update manifest: ${error}`);
+            }
         }
     }
 
@@ -458,7 +468,9 @@ exit 0
 
             return commits;
         } catch (error) {
-            simpleLogger.warn(`⚠️ Could not get recent commits: ${error}`);
+            if (this.cognitiveLogger) {
+                this.cognitiveLogger.warning(`Could not get recent commits: ${error}`);
+            }
             return [];
         }
     }

@@ -109,6 +109,33 @@ body {
   cursor: not-allowed;
 }
 
+/* First Use Mode - Special styling */
+.deviation-mode-selector select.first-use-mode {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  border-color: #667eea !important;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.3) !important;
+}
+
+/* Optgroup separator styling */
+.deviation-mode-selector select optgroup[label*="━━━━"] {
+  border-top: 2px solid #3d3d40;
+  margin-top: 8px;
+  padding-top: 8px;
+  color: #667eea;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* First Use option styling */
+.deviation-mode-selector select option[value="firstUse"] {
+  background: #667eea !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  padding: 12px !important;
+}
+
 /* Generate Button */
 .generate-button {
   background: linear-gradient(135deg, #007acc 0%, #005a9e 100%);

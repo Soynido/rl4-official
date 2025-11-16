@@ -11,7 +11,7 @@ interface NextTask {
 }
 
 interface NextTasksProps {
-  mode: 'strict' | 'flexible' | 'exploratory' | 'free';
+  mode: 'strict' | 'flexible' | 'exploratory' | 'free' | 'firstUse';
   steps: NextTask[];
 }
 
@@ -22,6 +22,7 @@ export const NextStepsCard: React.FC<NextTasksProps> = ({ mode, steps }) => {
       case 'flexible': return '🟡';
       case 'exploratory': return '🟢';
       case 'free': return '⚪';
+      case 'firstUse': return '🔍';
       default: return '🎯';
     }
   };
@@ -32,6 +33,7 @@ export const NextStepsCard: React.FC<NextTasksProps> = ({ mode, steps }) => {
       case 'flexible': return 'Flexible Mode (25%)';
       case 'exploratory': return 'Exploratory Mode (50%)';
       case 'free': return 'Free Mode (100%)';
+      case 'firstUse': return 'First Use Mode (Deep Analysis)';
       default: return 'Unknown Mode';
     }
   };
@@ -46,6 +48,8 @@ export const NextStepsCard: React.FC<NextTasksProps> = ({ mode, steps }) => {
         return 'Welcome creative ideas. New features OK if total bias < 50%.';
       case 'free':
         return 'Creative mode. All ideas welcome. No constraints.';
+      case 'firstUse':
+        return 'Analyze project history, detect context, and generate comprehensive snapshot. Use on first RL4 install or to refresh context.';
       default:
         return '';
     }

@@ -374,9 +374,22 @@ export class CorrelationEngine {
             const data = fs.readFileSync(this.ledgerPath, 'utf-8');
             const lines = data.trim().split('\n').filter(line => line.trim());
             
+            // Filter out Git conflict markers
+            const isGitConflictMarker = (line: string): boolean => {
+                const trimmed = line.trim();
+                return trimmed.startsWith('<<<<<<<') || 
+                       trimmed.startsWith('=======') || 
+                       trimmed.startsWith('>>>>>>>') ||
+                       trimmed.includes('<<<<<<< Updated upstream') ||
+                       trimmed.includes('>>>>>>> Stashed changes');
+            };
+            
             // Parse JSONL and take last 100 entries
             const entries: LedgerEntry[] = [];
             for (const line of lines.slice(-100)) {
+                if (isGitConflictMarker(line)) {
+                    continue; // Skip Git conflict markers
+                }
                 try {
                     entries.push(JSON.parse(line));
                 } catch (e) {

@@ -252,10 +252,23 @@ export class TimelineAggregator {
             return [];
         }
         
+        // Filter out Git conflict markers
+        const isGitConflictMarker = (line: string): boolean => {
+            const trimmed = line.trim();
+            return trimmed.startsWith('<<<<<<<') || 
+                   trimmed.startsWith('=======') || 
+                   trimmed.startsWith('>>>>>>>') ||
+                   trimmed.includes('<<<<<<< Updated upstream') ||
+                   trimmed.includes('>>>>>>> Stashed changes');
+        };
+        
         const lines = fs.readFileSync(cyclesPath, 'utf-8').split('\n').filter(Boolean);
         const cycles: any[] = [];
         
         for (const line of lines) {
+            if (isGitConflictMarker(line)) {
+                continue; // Skip Git conflict markers
+            }
             try {
                 const cycle = JSON.parse(line);
                 if (cycleIds.includes(cycle.cycleId)) {

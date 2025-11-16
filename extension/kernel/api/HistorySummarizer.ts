@@ -135,9 +135,30 @@ export class HistorySummarizer {
       return [];
     }
 
+    // Filter out Git conflict markers
+    const isGitConflictMarker = (line: string): boolean => {
+      const trimmed = line.trim();
+      return trimmed.startsWith('<<<<<<<') || 
+             trimmed.startsWith('=======') || 
+             trimmed.startsWith('>>>>>>>') ||
+             trimmed.includes('<<<<<<< Updated upstream') ||
+             trimmed.includes('>>>>>>> Stashed changes');
+    };
+
     const content = fs.readFileSync(cyclesPath, 'utf8');
     const lines = content.trim().split('\n').slice(-limit);
-    return lines.map(line => JSON.parse(line));
+    
+    return lines
+      .filter(line => !isGitConflictMarker(line)) // Remove Git conflict markers
+      .map(line => {
+        try {
+          return JSON.parse(line);
+        } catch (error) {
+          // Skip invalid lines (but don't warn for Git conflict markers as they're already filtered)
+          return null;
+        }
+      })
+      .filter((cycle): cycle is any => cycle !== null); // Remove null entries
   }
 
   /**

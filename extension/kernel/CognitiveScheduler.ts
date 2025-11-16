@@ -29,7 +29,7 @@ import { BuildMetricsListener } from './inputs/BuildMetricsListener';
 import { PatternEvolutionTracker } from './cognitive/PatternEvolutionTracker';
 import { SnapshotRotation } from './indexer/SnapshotRotation';
 import { AppendOnlyWriter } from './AppendOnlyWriter';
-import { CognitiveLogger } from './CognitiveLogger';
+import { CognitiveLogger, HourlySummary } from './CognitiveLogger';
 import * as crypto from 'crypto';
 import * as path from 'path';
 
@@ -61,6 +61,26 @@ export class CognitiveScheduler {
     private intervalMs: number = 10000; // Default 10s
     private logger: CognitiveLogger; // Cognitive logger for normalized output
     private workspaceRoot: string; // Workspace root for engines
+    
+    // Phase 4: Hourly summary tracking
+    private hourlySummaryTimer: NodeJS.Timeout | null = null;
+    private lastHourlySummaryTime: number = Date.now();
+    private accumulatedFileChanges: number = 0; // Will be updated in Phase 2 (FileChangeWatcher)
+    private accumulatedGitCommits: number = 0; // Will be updated in Phase 3 (GitCommitListener)
+    
+    /**
+     * Phase 3: Increment commit counter (called by GitCommitListener)
+     */
+    public incrementCommitCount(): void {
+        this.accumulatedGitCommits++;
+    }
+    
+    /**
+     * Phase 2: Increment file change counter (called by FileChangeWatcher)
+     */
+    public incrementFileChangeCount(count: number = 1): void {
+        this.accumulatedFileChanges += count;
+    }
     
     // Phase E1: Persistent ForecastEngine with adaptive baseline
     private forecastEngine: ForecastEngine;
@@ -217,6 +237,14 @@ export class CognitiveScheduler {
         );
         this.logger.system('✅ Watchdog timer registered successfully', '✅');
         this.logger.system(`🛡️ Watchdog active (checking every ${watchdogInterval}ms)`, '🛡️');
+        
+        // Phase 4: Register hourly summary timer (every 1 hour = 3600000ms)
+        this.logger.system('📊 Registering hourly summary timer (3600000ms)...', '📊');
+        this.hourlySummaryTimer = setInterval(() => {
+            this.generateHourlySummary();
+        }, 3600000); // 1 hour
+        this.logger.system('✅ Hourly summary timer registered successfully', '✅');
+        this.lastHourlySummaryTime = Date.now();
     }
     
     /**
@@ -245,11 +273,67 @@ export class CognitiveScheduler {
     }
     
     /**
-     * Stop all timers (cycle + watchdog)
+     * Generate hourly summary (Phase 4)
+     * Called every 1 hour by the hourly summary timer
+     */
+    private generateHourlySummary(): void {
+        try {
+            // Get accumulated cycles from logger
+            const cycleSummaries = this.logger.getCycleSummaries();
+            const cyclesCaptured = cycleSummaries.length;
+            
+            // Calculate health status from last cycle
+            let healthStatus = 'healthy';
+            let dataIntegrity: 'valid' | 'warning' | 'error' = 'valid';
+            if (cyclesCaptured > 0) {
+                const lastCycle = cycleSummaries[cyclesCaptured - 1];
+                healthStatus = lastCycle.health.status || 'healthy';
+                if (healthStatus === 'error' || healthStatus === 'critical') {
+                    dataIntegrity = 'error';
+                } else if (healthStatus === 'warning' || healthStatus === 'degraded') {
+                    dataIntegrity = 'warning';
+                }
+            }
+            
+            // Create hourly summary
+            const summary: HourlySummary = {
+                cycles_captured: cyclesCaptured,
+                file_changes: this.accumulatedFileChanges, // Will be updated by FileChangeWatcher (Phase 2)
+                git_commits: this.accumulatedGitCommits, // Will be updated by GitCommitListener (Phase 3)
+                health_checks: cyclesCaptured, // One health check per cycle
+                gaps_detected: 0, // TODO: Calculate gaps (time between cycles > 15 min)
+                health_status: healthStatus,
+                data_integrity: dataIntegrity
+            };
+            
+            // Log hourly summary
+            this.logger.logHourlySummary(summary);
+            
+            // Clear accumulated cycles (they're now in the hourly summary)
+            this.logger.clearCycleSummaries();
+            
+            // Reset accumulators for next hour
+            this.accumulatedFileChanges = 0;
+            this.accumulatedGitCommits = 0;
+            this.lastHourlySummaryTime = Date.now();
+            
+        } catch (error) {
+            this.logger.error(`Hourly summary generation failed: ${error}`);
+        }
+    }
+    
+    /**
+     * Stop all timers (cycle + watchdog + hourly summary)
      */
     stop(): void {
         this.timerRegistry.clear('kernel:cognitive-cycle');
         this.timerRegistry.clear('kernel:cognitive-watchdog');
+        
+        // Phase 4: Clear hourly summary timer
+        if (this.hourlySummaryTimer) {
+            clearInterval(this.hourlySummaryTimer);
+            this.hourlySummaryTimer = null;
+        }
         
         // Phase E2.6: Stop IDE & Build listeners (Quick Wins)
         try {
@@ -337,9 +421,8 @@ export class CognitiveScheduler {
             const correlationPhase = await this.runPhase('correlation', async () => {
                 const engine = new CorrelationEngine(this.workspaceRoot);
                 const correlations = await engine.analyze();
-                if (correlations.length === 0) {
-                    this.logger.warning('[DEBUG] No correlations generated - check traces/ directory');
-                }
+                // No correlations is normal for new workspaces or workspaces with limited activity
+                // CorrelationEngine already logs internally if needed
                 return { correlationsFound: correlations.length, correlations };
             });
             result.phases.push(correlationPhase);

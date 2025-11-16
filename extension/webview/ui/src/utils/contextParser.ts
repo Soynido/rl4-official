@@ -20,7 +20,7 @@ export interface NextTaskData {
 }
 
 export interface NextTasksData {
-  mode: 'strict' | 'flexible' | 'exploratory' | 'free';
+  mode: 'strict' | 'flexible' | 'exploratory' | 'free' | 'firstUse';
   steps: NextTaskData[];
 }
 
@@ -110,12 +110,12 @@ export function parseContextRL4(content: string): {
 
     // 2. Parse Next Tasks (allow extra text after "Mode")
     const nextTasksMatch = kpiSection.match(
-      /### Next (?:Steps|Tasks) \((Strict|Flexible|Exploratory|Free) Mode[^\)]*\)([\s\S]*?)(?=###|$)/i
+      /### Next (?:Steps|Tasks) \((Strict|Flexible|Exploratory|Free|First Use) Mode[^\)]*\)([\s\S]*?)(?=###|$)/i
     );
     
     if (nextTasksMatch) {
       console.log('[RL4 Parser] ✅ Next Tasks section found');
-      const mode = nextTasksMatch[1].toLowerCase() as 'strict' | 'flexible' | 'exploratory' | 'free';
+      const mode = nextTasksMatch[1].toLowerCase().replace(/\s+/g, '') as 'strict' | 'flexible' | 'exploratory' | 'free' | 'firstUse';
       const stepsText = nextTasksMatch[2];
       
       // Extract numbered steps with priorities (flexible format: **[P0] TEXT:** or [P0] TEXT)
@@ -175,7 +175,7 @@ export function parseContextRL4(content: string): {
       };
       
       // Extract threshold from text (e.g., "Strict: 0% threshold")
-      const thresholdMatch = driftText.match(/\((?:Strict|Flexible|Exploratory|Free): (\d+)% threshold\)/i);
+      const thresholdMatch = driftText.match(/\((?:Strict|Flexible|Exploratory|Free|First Use): (\d+)% threshold\)/i);
       const threshold = thresholdMatch ? parseInt(thresholdMatch[1]) : 25;
       
       console.log(`[RL4 Parser] ✅ Plan Drift parsed: ${percentage}%`);

@@ -423,22 +423,21 @@ export class PlanTasksContextParser {
 
   /**
    * Generate default Plan.RL4 if file doesn't exist
+   * NOTE: These are generic placeholders - the LLM agent will populate with real project goals in First Use mode
    */
   private generateDefaultPlan(): PlanData {
     return {
       version: '1.0.0',
       updated: new Date().toISOString(),
       confidence: 0.5,
-      phase: 'E3.3 - Single Context Snapshot System',
-      goal: 'Simplify RL4, eliminate fake data, create agent feedback loop',
+      phase: 'Initial Setup', // Generic placeholder - will be replaced by LLM with real project phase
+      goal: 'Project goals will be extracted from plan files, README, and conversation', // Generic placeholder
       timeline: {
         start: new Date().toISOString().split('T')[0],
         target: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // +3 days
       },
       successCriteria: [
-        '1 button UI',
-        'Agent feedback loop functional',
-        'No fake data'
+        'Project goals to be defined'
       ],
       constraints: []
     };
@@ -446,6 +445,7 @@ export class PlanTasksContextParser {
 
   /**
    * Generate default Tasks.RL4 if file doesn't exist
+   * NOTE: These are generic placeholders - the LLM agent will populate with real project tasks in First Use mode
    */
   private generateDefaultTasks(): TasksData {
     return {
@@ -453,8 +453,7 @@ export class PlanTasksContextParser {
       updated: new Date().toISOString(),
       bias: 0.0,
       active: [
-        { completed: false, task: 'Create Plan/Tasks/Context.RL4 structure' },
-        { completed: false, task: 'Test agent feedback loop' }
+        { completed: false, task: '[P0] Project tasks will be extracted from plan files and conversation' }
       ],
       blockers: [],
       completed: []

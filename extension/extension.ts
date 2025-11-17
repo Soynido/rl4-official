@@ -179,8 +179,11 @@ export async function activate(context: vscode.ExtensionContext) {
         // External delay: Ensure kernel is fully initialized before scheduler starts
         const channel = outputChannel; // Capture for setTimeout callback
         setTimeout(async () => {
+            console.log('[P0-CORE-01B] ⏰ Delayed scheduler initialization triggered');
             channel.appendLine(`[${new Date().toISOString().substring(11, 23)}] ⏳ Scheduler: Starting delayed initialization...`);
+            console.log('[P0-CORE-01B] Calling scheduler.start() with interval:', kernelConfig.cognitive_cycle_interval_ms);
             await scheduler.start(kernelConfig.cognitive_cycle_interval_ms);
+            console.log('[P0-CORE-01B] ✅ scheduler.start() completed');
             channel.appendLine(`[${new Date().toISOString().substring(11, 23)}] ✅ Scheduler started successfully`);
             channel.appendLine(`[${new Date().toISOString().substring(11, 23)}] 🛡️ Watchdog active (${kernelConfig.cognitive_cycle_interval_ms}ms cycles)`);
             
@@ -786,6 +789,137 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                         } catch (error) {
                             logger!.error(`Failed to open file: ${error}`);
                             vscode.window.showErrorMessage(`Failed to open ${message.fileName}: ${error}`);
+                        }
+                        break;
+                    
+                    case 'importLLMResponse':
+                        try {
+                            logger!.system('📥 Importing LLM response from clipboard...', '📥');
+                            
+                            // Read clipboard
+                            const clipboardText = await vscode.env.clipboard.readText();
+                            if (!clipboardText || clipboardText.trim() === '') {
+                                logger!.warning('Clipboard is empty');
+                                webviewPanel!.webview.postMessage({
+                                    type: 'llmImportError',
+                                    payload: { message: 'Clipboard is empty' }
+                                });
+                                vscode.window.showWarningMessage('RL4: Clipboard is empty. Copy LLM response first.');
+                                break;
+                            }
+                            
+                            // Extract JSON from multiple possible formats
+                            let jsonData: any = null;
+                            let extractedText = clipboardText.trim();
+                            
+                            // Format 1: RL4_PROPOSAL wrapper (with or without braces)
+                            const rl4Match = extractedText.match(/RL4_PROPOSAL\s*\{([\s\S]*)\}/);
+                            if (rl4Match) {
+                                try {
+                                    jsonData = JSON.parse(`{${rl4Match[1]}}`);
+                                    logger!.system('✅ Extracted JSON from RL4_PROPOSAL wrapper', '✅');
+                                } catch (e) {
+                                    logger!.warning(`Failed to parse RL4_PROPOSAL format: ${e}`);
+                                }
+                            }
+                            
+                            // Format 2: Fenced code block (```json or ```typescript)
+                            if (!jsonData) {
+                                const fencedMatch = extractedText.match(/```(?:json|typescript)?\s*([\s\S]*?)```/);
+                                if (fencedMatch) {
+                                    try {
+                                        jsonData = JSON.parse(fencedMatch[1].trim());
+                                        logger!.system('✅ Extracted JSON from fenced code block', '✅');
+                                    } catch (e) {
+                                        logger!.warning(`Failed to parse fenced code block: ${e}`);
+                                    }
+                                }
+                            }
+                            
+                            // Format 3: Raw JSON object
+                            if (!jsonData) {
+                                try {
+                                    jsonData = JSON.parse(extractedText);
+                                    logger!.system('✅ Parsed raw JSON', '✅');
+                                } catch (e) {
+                                    logger!.warning(`Failed to parse raw JSON: ${e}`);
+                                }
+                            }
+                            
+                            // Validate JSON structure
+                            if (!jsonData || typeof jsonData !== 'object') {
+                                logger!.error('Invalid JSON structure in clipboard');
+                                webviewPanel!.webview.postMessage({
+                                    type: 'llmImportError',
+                                    payload: { message: 'Invalid JSON format. Expected patterns, correlations, forecasts, external_evidence.' }
+                                });
+                                vscode.window.showErrorMessage('RL4: Invalid JSON format in clipboard');
+                                break;
+                            }
+                            
+                            // Write files to .reasoning_rl4/
+                            const stats = { patterns: 0, correlations: 0, forecasts: 0, adrs: 0 };
+                            
+                            // Write patterns.json
+                            if (jsonData.patterns && Array.isArray(jsonData.patterns)) {
+                                const patternsPath = path.join(rl4Path, 'patterns.json');
+                                fs.writeFileSync(patternsPath, JSON.stringify(jsonData.patterns, null, 2));
+                                stats.patterns = jsonData.patterns.length;
+                                logger!.system(`✅ Wrote ${stats.patterns} patterns to patterns.json`, '✅');
+                            }
+                            
+                            // Write correlations.json
+                            if (jsonData.correlations && Array.isArray(jsonData.correlations)) {
+                                const correlationsPath = path.join(rl4Path, 'correlations.json');
+                                fs.writeFileSync(correlationsPath, JSON.stringify(jsonData.correlations, null, 2));
+                                stats.correlations = jsonData.correlations.length;
+                                logger!.system(`✅ Wrote ${stats.correlations} correlations to correlations.json`, '✅');
+                            }
+                            
+                            // Write forecasts.json
+                            if (jsonData.forecasts && Array.isArray(jsonData.forecasts)) {
+                                const forecastsPath = path.join(rl4Path, 'forecasts.json');
+                                fs.writeFileSync(forecastsPath, JSON.stringify(jsonData.forecasts, null, 2));
+                                stats.forecasts = jsonData.forecasts.length;
+                                logger!.system(`✅ Wrote ${stats.forecasts} forecasts to forecasts.json`, '✅');
+                            }
+                            
+                            // Write ADRs (if external_evidence provided)
+                            if (jsonData.external_evidence && Array.isArray(jsonData.external_evidence)) {
+                                const adrsDir = path.join(rl4Path, 'adrs', 'auto');
+                                if (!fs.existsSync(adrsDir)) {
+                                    fs.mkdirSync(adrsDir, { recursive: true });
+                                }
+                                
+                                jsonData.external_evidence.forEach((evidence: any, index: number) => {
+                                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                                    const adrPath = path.join(adrsDir, `adr-external-${timestamp}-${index}.json`);
+                                    fs.writeFileSync(adrPath, JSON.stringify(evidence, null, 2));
+                                    stats.adrs++;
+                                });
+                                
+                                logger!.system(`✅ Wrote ${stats.adrs} external evidence to adrs/auto/`, '✅');
+                            }
+                            
+                            // Send success message to WebView
+                            webviewPanel!.webview.postMessage({
+                                type: 'llmResponseImported',
+                                payload: { stats }
+                            });
+                            
+                            // Show success notification
+                            vscode.window.showInformationMessage(
+                                `RL4: Imported ${stats.patterns} patterns, ${stats.correlations} correlations, ${stats.forecasts} forecasts, ${stats.adrs} evidence items`
+                            );
+                            
+                            logger!.system(`✅ LLM response imported successfully`, '✅');
+                        } catch (error) {
+                            logger!.error(`Failed to import LLM response: ${error}`);
+                            webviewPanel!.webview.postMessage({
+                                type: 'llmImportError',
+                                payload: { message: `Import failed: ${error}` }
+                            });
+                            vscode.window.showErrorMessage(`RL4: Failed to import LLM response: ${error}`);
                         }
                         break;
                     

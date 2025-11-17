@@ -50,6 +50,8 @@ export class RBOMLedger {
     private entries: RBOMEntry[] = [];
     private merkleRoots: MerkleRoot[] = [];
     private lastCycleMerkleRoot: string | null = null; // Cache for chain linking
+    private safeMode: boolean = false; // ✅ P1-INTEGRITY-02 PATCH 6: SAFE MODE flag
+    private corruptionReason: string | null = null; // ✅ P1-INTEGRITY-02 PATCH 6: Corruption details
     
     constructor(workspaceRootOrLedgerPath: string) {
         // Smart path resolution: if it ends with .jsonl, it's a file path
@@ -73,6 +75,9 @@ export class RBOMLedger {
         
         this.writer = new AppendOnlyWriter(ledgerPath);
         this.cyclesWriter = new AppendOnlyWriter(cyclesPath);
+        
+        // ✅ P0-HARDENING-02: Eager load Merkle cache (non-blocking, fallback to genesis)
+        this.initializeMerkleCache();
     }
     
     /**
@@ -257,13 +262,13 @@ export class RBOMLedger {
      * Append cycle summary to cycles.jsonl (with chain linking)
      */
     async appendCycle(cycleData: Omit<CycleSummary, 'prevMerkleRoot'>): Promise<void> {
-        // Lazy init: load last cycle's merkleRoot if not cached (for first append after restart)
-        if (this.lastCycleMerkleRoot === null) {
-            const lastCycle = await this.getLastCycle();
-            this.lastCycleMerkleRoot = lastCycle?.merkleRoot || null;
+        // ✅ P1-INTEGRITY-02 PATCH 6: Block writes in SAFE MODE
+        if (this.safeMode) {
+            throw new Error(`❌ RBOMLedger in SAFE MODE: Cannot append cycle. Reason: ${this.corruptionReason}`);
         }
         
-        // Get previous cycle's Merkle root for chain linking (use cache)
+        // Get previous cycle's Merkle root for chain linking
+        // ✅ P0-HARDENING-02: Circuit breaker - If cache null (disk failure), fallback to genesis
         const prevMerkleRoot = this.lastCycleMerkleRoot || '0000000000000000'; // Genesis
         
         // Compute Merkle root from phase hashes (deterministic)
@@ -282,9 +287,36 @@ export class RBOMLedger {
             prevMerkleRoot
         };
         
-        await this.cyclesWriter.append(cycle);
+        // ✅ P1-INTEGRITY-02 PATCH 2: Flush-before-cache-update with retry
+        let retries = 3;
+        let lastError: Error | null = null;
         
-        // Update cache for next cycle
+        while (retries > 0) {
+            try {
+                await this.cyclesWriter.append(cycle);
+                // CRITICAL: Verify append succeeded before updating cache
+                const lastCycle = await this.getLastCycle();
+                if (lastCycle?.merkleRoot !== merkleRoot) {
+                    throw new Error(`Flush verification failed: expected ${merkleRoot}, got ${lastCycle?.merkleRoot}`);
+                }
+                break; // Success
+            } catch (error) {
+                lastError = error as Error;
+                retries--;
+                if (retries > 0) {
+                    // Exponential backoff: 100ms, 200ms, 400ms
+                    await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, 3 - retries)));
+                    console.warn(`⚠️ RBOMLedger.appendCycle retry (${retries} left): ${lastError.message}`);
+                }
+            }
+        }
+        
+        if (retries === 0 && lastError) {
+            // CRITICAL: Do NOT update cache if flush failed
+            throw new Error(`❌ RBOMLedger.appendCycle failed after 3 retries: ${lastError.message}`);
+        }
+        
+        // Update cache ONLY after verified flush
         this.lastCycleMerkleRoot = merkleRoot;
     }
     
@@ -301,6 +333,40 @@ export class RBOMLedger {
      */
     async getAllCycles(): Promise<CycleSummary[]> {
         return await this.cyclesWriter.readAll();
+    }
+    
+    /**
+     * ✅ P0-HARDENING-02: Initialize Merkle cache with circuit breaker
+     * ✅ P1-INTEGRITY-02 PATCH 6: Add startup integrity verification
+     * Called once in constructor to eager-load cache (avoids lazy-load surprise latency)
+     */
+    private async initializeMerkleCache(): Promise<void> {
+        try {
+            const lastCycle = await this.getLastCycle();
+            this.lastCycleMerkleRoot = lastCycle?.merkleRoot || null;
+            
+            // ✅ P1-INTEGRITY-02 PATCH 6: Verify chain integrity on startup
+            const verificationResult = await this.verifyChain({ deep: true });
+            if (!verificationResult) {
+                // Chain is corrupted → enter SAFE MODE
+                this.safeMode = true;
+                this.corruptionReason = 'Chain verification failed on startup (deep verification)';
+                console.error(`❌ RBOMLedger: SAFE MODE ACTIVATED - ${this.corruptionReason}`);
+                console.error('   → No new cycles will be accepted until repaired');
+                console.error('   → Run RBOMLedger.repairChain() to attempt recovery');
+            } else {
+                console.log(`✅ RBOMLedger: Chain integrity verified (${await this.getAllCycles().then(c => c.length)} cycles)`);
+            }
+        } catch (error) {
+            // ✅ CIRCUIT BREAKER: Fallback to genesis if disk read fails
+            console.warn(`⚠️ RBOMLedger: Failed to load last cycle (${error}), using genesis`);
+            this.lastCycleMerkleRoot = null; // Will fallback to '0000000000000000' in appendCycle
+            
+            // ✅ P1-INTEGRITY-02 PATCH 6: Enter SAFE MODE on critical initialization failure
+            this.safeMode = true;
+            this.corruptionReason = `Critical initialization failure: ${error}`;
+            console.error(`❌ RBOMLedger: SAFE MODE ACTIVATED - ${this.corruptionReason}`);
+        }
     }
     
     /**
@@ -346,6 +412,17 @@ export class RBOMLedger {
     async flush(): Promise<void> {
         await this.writer.flush(true); // fsync
         await this.cyclesWriter.flush(true); // fsync
+    }
+    
+    /**
+     * Get ledger status (for monitoring/health checks)
+     * ✅ P1-INTEGRITY-02 PATCH 6: Add SAFE MODE status
+     */
+    getStatus(): { safeMode: boolean; corruptionReason: string | null } {
+        return {
+            safeMode: this.safeMode,
+            corruptionReason: this.corruptionReason
+        };
     }
 }
 

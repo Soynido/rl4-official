@@ -247,6 +247,21 @@ export default function App() {
             setTimeout(() => setFeedback(null), 3000);
           }
           break;
+        
+        case 'llmResponseImported':
+          logger.log('[RL4 WebView] LLM response imported:', message.payload);
+          if (message.payload && message.payload.stats) {
+            const { patterns, correlations, forecasts, adrs } = message.payload.stats;
+            setFeedback(`✅ Imported: ${patterns} patterns, ${correlations} correlations, ${forecasts} forecasts, ${adrs} evidence`);
+            setTimeout(() => setFeedback(null), 5000);
+          }
+          break;
+        
+        case 'llmImportError':
+          logger.error('[RL4 WebView] LLM import error:', message.payload);
+          setFeedback(`❌ Import failed: ${message.payload?.message || 'Unknown error'}`);
+          setTimeout(() => setFeedback(null), 5000);
+          break;
           
         case 'tasksLoaded':
           logger.log('[RL4 WebView] Tasks.RL4 loaded'); // ✅ FIXED
@@ -876,6 +891,33 @@ export default function App() {
 
         {activeTab === 'dev' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* Import LLM Response Button */}
+            <div style={{ marginBottom: '8px' }}>
+              <button
+                onClick={() => {
+                  if (window.vscode) {
+                    window.vscode.postMessage({ type: 'importLLMResponse' });
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '10px 16px',
+                  fontSize: '13px',
+                  background: 'var(--vscode-button-background)',
+                  color: 'var(--vscode-button-foreground)',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 600
+                }}
+              >
+                📥 Import LLM Response (from clipboard)
+              </button>
+              <p style={{ fontSize: '10px', color: 'var(--vscode-descriptionForeground)', margin: '6px 0 0 0' }}>
+                Copy your LLM response (with <code>RL4_PROPOSAL</code> wrapper) and click this button to populate cognitive files.
+              </p>
+            </div>
+
             {/* Auto-Suggestions Section */}
             {suggestions.length > 0 && (
               <div>

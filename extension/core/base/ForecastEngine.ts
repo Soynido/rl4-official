@@ -28,11 +28,11 @@ export class ForecastEngine {
 
     constructor(workspaceRoot: string) {
         this.workspaceRoot = workspaceRoot;
-        this.forecastsPath = path.join(workspaceRoot, '.reasoning', 'forecasts.json');
-        this.patternsPath = path.join(workspaceRoot, '.reasoning', 'patterns.json');
-        this.correlationsPath = path.join(workspaceRoot, '.reasoning', 'correlations.json');
-        this.marketSignalsPath = path.join(workspaceRoot, '.reasoning', 'external', 'market_signals.json');
-        this.ledgerPath = path.join(workspaceRoot, '.reasoning', 'external', 'ledger.jsonl');
+        this.forecastsPath = path.join(workspaceRoot, '.reasoning_rl4', 'forecasts.json');
+        this.patternsPath = path.join(workspaceRoot, '.reasoning_rl4', 'patterns.json');
+        this.correlationsPath = path.join(workspaceRoot, '.reasoning_rl4', 'correlations.json');
+        this.marketSignalsPath = path.join(workspaceRoot, '.reasoning_rl4', 'external', 'market_signals.json');
+        this.ledgerPath = path.join(workspaceRoot, '.reasoning_rl4', 'external', 'ledger.jsonl');
     }
 
     /**
@@ -435,7 +435,7 @@ export class ForecastEngine {
      */
     private async saveRawForecasts(forecasts: Forecast[]): Promise<void> {
         try {
-            const rawForecastsPath = path.join(this.workspaceRoot, '.reasoning', 'forecasts.raw.json');
+            const rawForecastsPath = path.join(this.workspaceRoot, '.reasoning_rl4', 'forecasts.raw.json');
             fs.writeFileSync(
                 rawForecastsPath,
                 JSON.stringify(forecasts, null, 2),

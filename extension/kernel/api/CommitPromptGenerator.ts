@@ -144,7 +144,7 @@ export class CommitPromptGenerator {
         prompt += `git add .\n`;
         prompt += `git commit -m "refactor: [your title]"\n\n`;
         prompt += `# Step 3: Push branch\n`;
-        prompt += `git push -u origin refactor/[branch-name]\n\n`;
+        prompt += `git push -u ${context.githubRemote} refactor/[branch-name]\n\n`;
         prompt += `# Step 4: Create PR (use single quotes for body to avoid shell issues)\n`;
         prompt += `gh pr create --title "refactor: [your title]" --body '[your body with actual newlines]' --base ${context.defaultBranch}\n`;
         prompt += `\`\`\`\n\n`;
@@ -152,14 +152,15 @@ export class CommitPromptGenerator {
         prompt += `- Replace [branch-name] with a descriptive name (e.g., \`rl4-kpis-update\`)\n`;
         prompt += `- Use **single quotes** for the --body to avoid shell interpretation of backticks and special chars\n`;
         prompt += `- Use actual newlines (\\n) in the body string\n`;
-        prompt += `- **Default branch detected:** \`${context.defaultBranch}\` (use this in --base)\n\n`;
+        prompt += `- **Default branch detected:** \`${context.defaultBranch}\` (use this in --base)\n`;
+        prompt += `- **GitHub remote detected:** \`${context.githubRemote}\` (use this in git push)\n\n`;
         prompt += `## ✅ RL4 Validation Token\n`;
         prompt += `Copy this EXACT block and paste it in RL4 webview to validate and execute:\n\n`;
         prompt += `**CRITICAL:** You MUST format the token block EXACTLY as shown below, with line breaks:\n\n`;
         prompt += `\`\`\`\n`;
         prompt += `RL4_COMMIT_VALIDATE\n`;
         prompt += `WHY: [your WHY from above]\n`;
-        prompt += `COMMAND: [the complete workflow: git checkout -b ... && git add . && git commit -m "..." && git push -u origin ... && gh pr create ...]\n`;
+        prompt += `COMMAND: [the complete workflow: git checkout -b ... && git add . && git commit -m "..." && git push -u ${context.githubRemote} ... && gh pr create ...]\n`;
         prompt += `RL4_COMMIT_END\n`;
         prompt += `\`\`\`\n\n`;
         prompt += `**IMPORTANT FORMATTING RULES:**\n`;

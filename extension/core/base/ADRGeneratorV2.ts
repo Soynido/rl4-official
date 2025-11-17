@@ -44,9 +44,9 @@ export class ADRGeneratorV2 {
 
     constructor(workspaceRoot: string) {
         this.workspaceRoot = workspaceRoot;
-        this.forecastsPath = path.join(workspaceRoot, '.reasoning', 'forecasts.json');
-        this.patternsPath = path.join(workspaceRoot, '.reasoning', 'patterns.json');
-        this.autoAdrDir = path.join(workspaceRoot, '.reasoning', 'adrs', 'auto');
+        this.forecastsPath = path.join(workspaceRoot, '.reasoning_rl4', 'forecasts.json');
+        this.patternsPath = path.join(workspaceRoot, '.reasoning_rl4', 'patterns.json');
+        this.autoAdrDir = path.join(workspaceRoot, '.reasoning_rl4', 'adrs', 'auto');
         this.proposalIndexPath = path.join(this.autoAdrDir, 'proposals.index.json');
     }
 

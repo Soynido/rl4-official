@@ -98,6 +98,85 @@ bias: 30.61
 
 ---
 
+### 🔴 SPRINT P0-HARDENING: Production Stability (1h35min estimated)
+
+**🎯 OBJECTIF:** Garantir stabilité RL4 en production (Scheduler, Ledger, Config)
+
+#### **Phase 0: Scheduler Stability (20min)** 🔴 CRITICAL
+- [x] [P0] Garantir reset isRunning @rl4:id=P0-HARDENING-01 @rl4:verified="2025-11-17T15:35:00Z"
+  - ✅ Wrap entire runCycle() in outermost try/finally with guaranteed isRunning = false
+  - ✅ Target: extension/kernel/CognitiveScheduler.ts:385-527
+  - ✅ Added outer try block (line 394) and outer finally block (line 523-526)
+  - ✅ Moved isRunning = false from inner finally (line 475) to outer finally (line 525)
+  - ✅ Verification: All return paths now pass through outer finally, guaranteed reset
+  - Impact: Prevents scheduler deadlock on unhandled errors (OOM, stack overflow, post-processing failures)
+
+#### **Phase 1: Ledger Stability (45min)** 🟠 HIGH
+- [x] [P0] Stabiliser cache Merkle @rl4:id=P0-HARDENING-02 @rl4:verified="2025-11-17T15:50:00Z"
+  - ✅ Moved lastCycleMerkleRoot initialization to constructor (eager load)
+  - ✅ Added circuit breaker: initializeMerkleCache() with try/catch fallback to genesis
+  - ✅ Removed lazy-load block (lines 260-264) from appendCycle()
+  - ✅ Target: extension/kernel/RBOMLedger.ts:54-317
+  - ✅ New method initializeMerkleCache() (lines 304-317)
+  - ✅ Constructor call at line 78
+  - ✅ Genesis fallback documented (line 265)
+  - ✅ Verification: Simulate disk corruption, ledger continues appending with genesis fallback
+  - Impact: Prevents circular dependency, eliminates lazy-load surprise latency, guarantees robustness on disk failure
+
+#### **Phase 2: Production Config (30min)** 🔴 CRITICAL
+- [x] [P0] Enforcer config PROD par défaut @rl4:id=P0-HARDENING-03 @rl4:verified="2025-11-17T16:00:00Z"
+  - ✅ Changed default cognitive_cycle_interval_ms from 10000 to 7200000 (2h production)
+  - ✅ Added TEST_MODE flag to KernelConfig interface (optional boolean)
+  - ✅ Added validation: if cognitive_cycle_interval_ms < 60000 AND TEST_MODE !== true → throw error
+  - ✅ Created .reasoning_rl4/kernel_config.json with production defaults (7200000ms, TEST_MODE: false)
+  - ✅ Target: extension/kernel/config.ts:11-69
+  - ✅ Config auto-generated on first load if missing (line 44-48)
+  - ✅ Verification: Extension activation with no config → uses 2h cycles; with TEST_MODE: true → allows 10s cycles
+  - Impact: Prevents resource exhaustion in production (720x fewer cycles than old default)
+
+---
+
+### 🔵 SPRINT P1-INTEGRITY: Ledger Verification & Hardening (Completed)
+
+**🎯 OBJECTIF:** Verify integrity of Merkle chain and ledger correctness
+
+#### **Phase 0: Merkle Circularity Check (15min)** 🔵 COMPLETED
+- [x] [P1] Investigate alleged Merkle circular reference @rl4:id=P1-INTEGRITY-01 @rl4:verified="2025-11-17T16:10:00Z"
+  - ✅ Reviewed RBOMLedger.appendCycle() (lines 262-287)
+  - ✅ Reviewed RBOMLedger.verifyChain() (lines 323-354)
+  - ✅ Reviewed all Merkle computation and verification code paths
+  - ✅ Result: NO-BUG (false positive)
+  - ✅ Confirmation: merkleRoot computed from phase hashes ONLY, BEFORE cycle object construction
+  - ✅ Confirmation: verifyChain() recomputes from same phase hashes (no self-inclusion)
+  - ✅ Confirmation: No code path hashes object containing merkleRoot
+  - Impact: Integrity of ledger chain confirmed for v3.5.11
+  - Note: "P1-INTEGRITY-01 closed as FALSE POSITIVE — no circular Merkle dependency in current RBOMLedger implementation."
+
+#### **Phase 1: Critical Integrity Patches (2h)** 🔵 COMPLETED
+- [x] [P1] PATCH 2: Flush-Before-Cache-Update @rl4:id=P1-INTEGRITY-02-PATCH-2 @rl4:verified="2025-11-17T16:30:00Z"
+  - ✅ Target: RBOMLedger.appendCycle() (lines 283-320)
+  - ✅ Added flush verification with 3 retries (exponential backoff: 100ms, 200ms, 400ms)
+  - ✅ Cache update ONLY after verified flush (prevents stale prevMerkleRoot)
+  - ✅ Throws error if all retries exhausted (prevents silent corruption)
+  - Impact: Eliminates cache desync risk after crash (Risk Vector 2)
+
+- [x] [P1] PATCH 5: Partial Write Validator @rl4:id=P1-INTEGRITY-02-PATCH-5 @rl4:verified="2025-11-17T16:30:00Z"
+  - ✅ Target: AppendOnlyWriter (lines 89-152, 210-245)
+  - ✅ Added validateLastLine() method (reads last 1KB, validates JSON, truncates if invalid)
+  - ✅ Called before rotation (line 163) and before readAll() (line 216)
+  - ✅ Automatic truncation to last valid newline on corruption detection
+  - Impact: Prevents unparseable JSONL from disk-full or crash scenarios (Corruption Vector 1)
+
+- [x] [P1] PATCH 6: Ledger Integrity Verification on Startup @rl4:id=P1-INTEGRITY-02-PATCH-6 @rl4:verified="2025-11-17T16:30:00Z"
+  - ✅ Target: RBOMLedger.initializeMerkleCache() (lines 343-370) + appendCycle() (lines 265-268)
+  - ✅ Added SAFE MODE flag: blocks appendCycle() if chain verification fails
+  - ✅ Deep verification on startup (verifyChain({deep:true}))
+  - ✅ Corruption reason stored and logged (user-facing diagnostics)
+  - ✅ Added getStatus() method for monitoring SAFE MODE state
+  - Impact: Prevents extension from extending corrupted chain (Corruption Vector 3, 6)
+
+---
+
 ### ✅ E4.1 — Memory Safety (Completed)
 
 **Sprint complété:** 2025-11-17T14:50  
@@ -778,3 +857,180 @@ rl4_task_result "task-001" "success" $?
 - [ ] [P0] Create verification file @rl4:id=auto-test-003 @rl4:completeWhen="file exists: .test-verification.txt"
 - [ ] [P1] Install dependencies @rl4:id=auto-test-004 @rl4:completeWhen="npm install" @rl4:completeWhen="exitCode 0"
 
+
+# ═══════════════════════════════════════════════════════════════
+# 🎯 SPRINT P0-CORE: Production Kernel
+# ═══════════════════════════════════════════════════════════════
+# Started: 2025-11-17T19:45:00.000Z
+# Goal: Rendre le kernel RL4 production-ready (diagnostic + repair cognitive loop + observability)
+# Estimated: 12-14h total
+# ═══════════════════════════════════════════════════════════════
+
+## P0-CORE-00 — Fix Cognitive Loop Inertia 🔴 CRITICAL
+
+- [ ] [P0] Diagnose why PatternLearningEngine.analyzePatterns() returns [] @rl4:id=P0-CORE-00-patterns
+  - Goal: Identify root cause why 721 cycles produced count: 0 for patterns
+  - Files: extension/core/base/PatternLearningEngine.ts
+  - Status: pending
+  - Priority: CRITICAL (bloquant pour toutes autres tâches)
+
+- [ ] [P0] Diagnose why CorrelationEngine.analyze() returns [] @rl4:id=P0-CORE-00-correlations
+  - Goal: Identify root cause why 721 cycles produced count: 0 for correlations
+  - Files: extension/core/base/CorrelationEngine.ts
+  - Status: pending
+  - Priority: CRITICAL
+
+- [ ] [P0] Diagnose why ForecastEngine.generate() returns [] @rl4:id=P0-CORE-00-forecasts
+  - Goal: Identify root cause why 721 cycles produced count: 0 for forecasts
+  - Files: extension/core/base/ForecastEngine.ts
+  - Status: pending
+  - Priority: CRITICAL
+
+- [ ] [P0] Diagnose why ADRGeneratorV2.generateProposals() returns [] @rl4:id=P0-CORE-00-adrs
+  - Goal: Identify root cause why 721 cycles produced count: 0 for ADRs
+  - Files: extension/core/base/ADRGeneratorV2.ts
+  - Status: pending
+  - Priority: CRITICAL
+
+- [ ] [P0] Fix cognitive engines to produce non-empty results @rl4:id=P0-CORE-00-fix
+  - Goal: After fix, cycles.jsonl shows count > 0 for at least 1 phase, merkleRoot changes between cycles
+  - Files: extension/core/base/*, extension/kernel/CognitiveScheduler.ts
+  - Status: pending
+  - Priority: CRITICAL
+  - Estimated: 2-4h (depends on root cause complexity)
+
+## P0-CORE-01 — Kernel Artifact Engine 🟡 P1
+
+- [ ] [P1] Create ArtifactWriter.ts with writeAtomic() method @rl4:id=P0-CORE-01-writer
+  - Goal: Implement atomic write for state.json.gz with checksum verification
+  - Files: extension/kernel/api/ArtifactWriter.ts (NEW)
+  - Status: pending
+  - Estimated: 1h
+
+- [ ] [P1] Create ArtifactLoader.ts with loadWithRetry() method @rl4:id=P0-CORE-01-loader
+  - Goal: Implement retry logic (3x exponential backoff) for artifact loading
+  - Files: extension/kernel/api/ArtifactLoader.ts (NEW)
+  - Status: pending
+  - Estimated: 30min
+
+- [ ] [P1] Integrate artifact generation in CognitiveScheduler @rl4:id=P0-CORE-01-integrate
+  - Goal: Call artifactWriter.writeState() in aggregateAndPersistCycle() every 10 cycles
+  - Files: extension/kernel/CognitiveScheduler.ts
+  - Status: pending
+  - Dependencies: P0-CORE-01-writer must be completed
+  - Estimated: 30min
+  - Success: After 10 cycles, .reasoning_rl4/state.json.gz exists with valid cycle count, merkle root, health metrics
+
+## P0-CORE-02 — Kernel Ready Protocol 🔴 HIGH
+
+- [ ] [P0] Create KernelReadyProtocol.ts with init/loadArtifacts/verifyLedger @rl4:id=P0-CORE-02-protocol
+  - Goal: Implement initialization sequence with ready flag and waitForKernelReady()
+  - Files: extension/kernel/api/KernelReadyProtocol.ts (NEW)
+  - Status: pending
+  - Estimated: 1h
+
+- [ ] [P0] Integrate protocol in extension.ts activation @rl4:id=P0-CORE-02-activate
+  - Goal: Call kernelProtocol.init() before WebView creation, block WebView until ready
+  - Files: extension/extension.ts
+  - Status: pending
+  - Dependencies: P0-CORE-02-protocol must be completed
+  - Estimated: 30min
+  - Success: Logs show "⏳ Kernel initializing..." then "✅ Kernel ready (X.Xs)", no race conditions
+
+## P0-CORE-03 — WebView Bridge v1 🔴 CRITICAL
+
+- [ ] [P0] Create KernelStatusAPI.ts with getStatus() aggregator @rl4:id=P0-CORE-03-api
+  - Goal: Aggregate status from CognitiveScheduler, RBOMLedger, HealthMonitor
+  - Files: extension/kernel/api/KernelStatusAPI.ts (NEW)
+  - Status: pending
+  - Estimated: 45min
+
+- [ ] [P0] Add CognitiveScheduler.getStatus() method @rl4:id=P0-CORE-03-scheduler
+  - Goal: Expose cycleCount, isRunning, lastCycleTime, lastInputHash
+  - Files: extension/kernel/CognitiveScheduler.ts
+  - Status: pending
+  - Estimated: 15min
+
+- [ ] [P0] Implement rl4:getStatus handler in extension.ts @rl4:id=P0-CORE-03-handler
+  - Goal: WebView sends rl4:getStatus → backend calls KernelStatusAPI.getStatus() → returns JSON to WebView
+  - Files: extension/extension.ts
+  - Status: pending
+  - Dependencies: P0-CORE-03-api, P0-CORE-03-scheduler must be completed
+  - Estimated: 30min
+
+- [ ] [P0] Add Kernel Status section in WebView Control Tab @rl4:id=P0-CORE-03-ui
+  - Goal: Display cycle count, SAFE MODE status, last cycle timestamp
+  - Files: extension/webview/ui/src/App.tsx
+  - Status: pending
+  - Dependencies: P0-CORE-03-handler must be completed
+  - Estimated: 30min
+  - Success: Execute window.postMessage({ command: "rl4:getStatus" }) → JSON response visible in console, UI displays kernel status
+
+## P0-CORE-04 — Cognitive Loop Full Mode (Identical to CORE-00)
+
+- [ ] [P0] Enable PatternLearningEngine real output @rl4:id=P0-CORE-04-patterns
+  - Goal: Same as P0-CORE-00-patterns (duplicate for clarity)
+  - Files: extension/core/base/PatternLearningEngine.ts
+  - Status: pending
+  - Note: This task is the SAME as P0-CORE-00. Fix CORE-00 first.
+
+- [ ] [P0] Enable CorrelationEngine real output @rl4:id=P0-CORE-04-correlations
+  - Goal: Same as P0-CORE-00-correlations
+  - Files: extension/core/base/CorrelationEngine.ts
+  - Status: pending
+
+- [ ] [P0] Enable ForecastEngine real output @rl4:id=P0-CORE-04-forecasts
+  - Goal: Same as P0-CORE-00-forecasts
+  - Files: extension/core/base/ForecastEngine.ts
+  - Status: pending
+
+- [ ] [P0] Enable ADRGeneratorV2 real output @rl4:id=P0-CORE-04-adrs
+  - Goal: Same as P0-CORE-00-adrs
+  - Files: extension/core/base/ADRGeneratorV2.ts
+  - Status: pending
+
+## P0-CORE-05 — Production Scheduler 🟡 P1
+
+- [ ] [P1] Implement adaptive interval logic @rl4:id=P0-CORE-05-adaptive
+  - Goal: Replace fixed interval with adaptive (10s → 15s → 2min → 10min based on activity)
+  - Files: extension/kernel/CognitiveScheduler.ts
+  - Status: pending
+  - Estimated: 1h
+
+- [ ] [P1] Implement burst mode for major events @rl4:id=P0-CORE-05-burst
+  - Goal: Trigger immediate cycle on git commit, file save (configurable)
+  - Files: extension/kernel/CognitiveScheduler.ts
+  - Status: pending
+  - Estimated: 30min
+
+- [ ] [P1] Implement cooldown mode for high memory @rl4:id=P0-CORE-05-cooldown
+  - Goal: If HealthMonitor reports memory > 450 MB, increase interval to 4h
+  - Files: extension/kernel/CognitiveScheduler.ts, extension/kernel/HealthMonitor.ts
+  - Status: pending
+  - Estimated: 30min
+  - Success: Logs show "⚡ Burst mode triggered" on commit, "🧊 Cooldown mode: memory high" when > 450 MB
+
+## P0-CORE-06 — Kernel Sovereignty Mode 🟡 P1
+
+- [ ] [P1] Add kernel.ready validation in WebView message handlers @rl4:id=P0-CORE-06-validation
+  - Goal: All handlers check kernel.ready before processing, emit kernel:not-ready if false
+  - Files: extension/extension.ts
+  - Status: pending
+  - Estimated: 30min
+
+- [ ] [P1] Implement kernel:not-ready message to WebView @rl4:id=P0-CORE-06-message
+  - Goal: Send { type: 'kernel:not-ready', reason: '...' } when handlers called too early
+  - Files: extension/extension.ts
+  - Status: pending
+  - Estimated: 15min
+
+- [ ] [P1] Add "Kernel initializing..." screen in WebView @rl4:id=P0-CORE-06-ui
+  - Goal: Display loading screen when kernel:not-ready received, hide when kernel:ready
+  - Files: extension/webview/ui/src/App.tsx
+  - Status: pending
+  - Estimated: 45min
+  - Success: Open WebView immediately after activation → shows "⏳ Kernel initializing...", then normal UI after 3s
+
+# ═══════════════════════════════════════════════════════════════
+# END OF P0-CORE SPRINT
+# ═══════════════════════════════════════════════════════════════

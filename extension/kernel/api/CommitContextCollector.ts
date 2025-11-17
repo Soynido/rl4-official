@@ -53,6 +53,7 @@ export interface CommitContext {
     workspaceRoot: string;
     timestamp: string;
     defaultBranch: string; // main or master
+    githubRemote: string; // Remote name for GitHub repo (e.g., "rl4-official" or "origin")
 }
 
 export class CommitContextCollector {
@@ -81,7 +82,8 @@ export class CommitContextCollector {
             timelineContext: [],
             workspaceRoot: this.workspaceRoot,
             timestamp: new Date().toISOString(),
-            defaultBranch: 'main' // Will be detected
+            defaultBranch: 'main', // Will be detected
+            githubRemote: 'origin' // Will be detected from GitHub token
         };
         
         // 1. Collect Git diff stat
@@ -284,6 +286,38 @@ export class CommitContextCollector {
         } catch (error) {
             console.warn('Failed to detect default branch, using main:', error);
             context.defaultBranch = 'main';
+        }
+        
+        // 9. Detect GitHub remote from token configuration
+        try {
+            const githubTokenPath = path.join(this.workspaceRoot, '.reasoning', 'security', 'github.json');
+            if (fs.existsSync(githubTokenPath)) {
+                const tokenData = JSON.parse(fs.readFileSync(githubTokenPath, 'utf-8'));
+                const repoSlug = tokenData.repo; // e.g., "Soynido/rl4-official"
+                
+                if (repoSlug) {
+                    // Find which remote points to this repo
+                    const remotesResult = await this.execPool.run(
+                        'git remote -v',
+                        { cwd: this.workspaceRoot }
+                    );
+                    const remotes = remotesResult.stdout.trim().split('\n');
+                    
+                    for (const remoteLine of remotes) {
+                        if (remoteLine.includes(repoSlug)) {
+                            const remoteMatch = remoteLine.match(/^(\S+)\s+/);
+                            if (remoteMatch) {
+                                context.githubRemote = remoteMatch[1];
+                                console.log(`✅ Detected GitHub remote: ${context.githubRemote} → ${repoSlug}`);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to detect GitHub remote from token, using origin:', error);
+            // Keep default 'origin'
         }
         
         return context;

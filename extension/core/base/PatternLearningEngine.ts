@@ -22,7 +22,7 @@ export class PatternLearningEngine {
 
     constructor(workspaceRoot: string) {
         this.workspaceRoot = workspaceRoot;
-        this.patternsPath = path.join(workspaceRoot, '.reasoning', 'patterns.json');
+        this.patternsPath = path.join(workspaceRoot, '.reasoning_rl4', 'patterns.json');
     }
 
     /**
@@ -118,7 +118,7 @@ export class PatternLearningEngine {
      */
     private async applyAdaptiveRegulation(patterns: DecisionPattern[]): Promise<DecisionPattern[]> {
         // Read raw forecasts (before deduplication) to detect duplicates
-        const rawForecastsPath = path.join(this.workspaceRoot, '.reasoning', 'forecasts.raw.json');
+        const rawForecastsPath = path.join(this.workspaceRoot, '.reasoning_rl4', 'forecasts.raw.json');
         
         if (!fs.existsSync(rawForecastsPath)) {
             return patterns;
@@ -180,7 +180,7 @@ export class PatternLearningEngine {
         const entries: LedgerEntry[] = [];
 
         // Load main ledger
-        const mainLedger = path.join(this.workspaceRoot, '.reasoning', 'ledger', 'ledger.jsonl');
+        const mainLedger = path.join(this.workspaceRoot, '.reasoning_rl4', 'ledger', 'ledger.jsonl');
         if (fs.existsSync(mainLedger)) {
             const lines = fs.readFileSync(mainLedger, 'utf-8').split('\n').filter(Boolean);
             for (const line of lines) {
@@ -193,7 +193,7 @@ export class PatternLearningEngine {
         }
 
         // Load external ledger
-        const externalLedger = path.join(this.workspaceRoot, '.reasoning', 'external', 'ledger.jsonl');
+        const externalLedger = path.join(this.workspaceRoot, '.reasoning_rl4', 'external', 'ledger.jsonl');
         if (fs.existsSync(externalLedger)) {
             const lines = fs.readFileSync(externalLedger, 'utf-8').split('\n').filter(Boolean);
             for (const line of lines) {

@@ -1,23 +1,22 @@
 {
-  "last_updated": "2025-11-17T15:11:32.709Z",
-  "current_cycle": 537,
+  "last_updated": "2025-11-17T21:56:12.884Z",
+  "current_cycle": 176,
   "pattern": "",
   "pattern_confidence": 0,
-  "forecast": "",
-  "forecast_confidence": 0,
+  "forecast_confidence": 0.9,
   "intent": "feature",
   "adr": null,
   "files": [
-    "extension/webview/ui/src/utils/logger.ts",
-    "extension/kernel/MemoryWatchdog.ts",
-    "extension/extension.ts",
+    "extension/kernel/CognitiveScheduler.ts",
+    "SNAPSHOT_FINAL_E3.4.md",
+    "TEST_CHECKLIST_v3.5.10.md",
     "reasoning-layer-rl4-3.5.11.vsix",
-    "cursor_recalibration_protocol_execution_part_aa"
+    "extension/extension.ts"
   ],
   "stats": {
-    "total_cycles": 537,
+    "total_cycles": 176,
     "total_patterns": 0,
-    "total_forecasts": 0,
-    "total_adrs": 0
+    "total_forecasts": 3,
+    "total_adrs": 3
   }
 }

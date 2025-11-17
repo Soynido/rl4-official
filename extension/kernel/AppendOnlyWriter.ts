@@ -87,12 +87,80 @@ export class AppendOnlyWriter {
     }
     
     /**
+     * ✅ P1-INTEGRITY-02 PATCH 5: Validate last line is complete JSON
+     */
+    private async validateLastLine(): Promise<void> {
+        if (!fsSync.existsSync(this.filePath)) {
+            return;
+        }
+        
+        const stats = await fs.stat(this.filePath);
+        if (stats.size === 0) {
+            return;
+        }
+        
+        // Read last 1KB (enough for typical JSONL line)
+        const fd = await fs.open(this.filePath, 'r');
+        try {
+            const bufferSize = Math.min(1024, stats.size);
+            const buffer = Buffer.alloc(bufferSize);
+            await fd.read(buffer, 0, bufferSize, stats.size - bufferSize);
+            
+            const tail = buffer.toString('utf-8');
+            const lastNewlineIndex = tail.lastIndexOf('\n');
+            
+            if (lastNewlineIndex === -1) {
+                // No newline found → file might be corrupted
+                console.warn('⚠️ AppendOnlyWriter: No newline in tail, file might be empty or corrupted');
+                return;
+            }
+            
+            // Get last line (after last newline)
+            const lastLine = tail.substring(lastNewlineIndex + 1).trim();
+            
+            if (lastLine.length === 0) {
+                // File ends with newline (valid)
+                return;
+            }
+            
+            // Try to parse last line
+            try {
+                JSON.parse(lastLine);
+                // Valid JSON, all good
+            } catch (error) {
+                // Invalid JSON → truncate to last valid newline
+                const truncatePosition = stats.size - (tail.length - lastNewlineIndex);
+                console.warn(`⚠️ AppendOnlyWriter: Invalid last line detected, truncating to ${truncatePosition} bytes`);
+                console.warn(`   Invalid content: ${lastLine.substring(0, 100)}...`);
+                
+                await fd.close();
+                await fs.truncate(this.filePath, truncatePosition);
+                
+                // Re-open for verification
+                const fdVerify = await fs.open(this.filePath, 'r');
+                try {
+                    const statsVerify = await fdVerify.stat();
+                    console.log(`✅ Truncated ${path.basename(this.filePath)} from ${stats.size} to ${statsVerify.size} bytes`);
+                } finally {
+                    await fdVerify.close();
+                }
+                return;
+            }
+        } finally {
+            await fd.close();
+        }
+    }
+    
+    /**
      * Rotate file if size OR line count exceeds limit (✅ ENHANCED)
      */
     private async rotateIfNeeded(): Promise<void> {
         if (!fsSync.existsSync(this.filePath)) {
             return;
         }
+        
+        // ✅ P1-INTEGRITY-02 PATCH 5: Validate before rotation
+        await this.validateLastLine();
         
         const stats = await fs.stat(this.filePath);
         const sizeMB = stats.size / 1024 / 1024;
@@ -143,6 +211,9 @@ export class AppendOnlyWriter {
         if (!fsSync.existsSync(this.filePath)) {
             return [];
         }
+        
+        // ✅ P1-INTEGRITY-02 PATCH 5: Validate before reading
+        await this.validateLastLine();
         
         const content = await fs.readFile(this.filePath, 'utf-8');
         const lines = content.trim().split('\n').filter(l => l);

@@ -32,6 +32,12 @@ import { AppendOnlyWriter } from './AppendOnlyWriter';
 import { CognitiveLogger, HourlySummary } from './CognitiveLogger';
 import * as crypto from 'crypto';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as zlib from 'zlib';
+import { promisify } from 'util';
+
+const gzip = promisify(zlib.gzip);
+const gunzip = promisify(zlib.gunzip);
 
 export interface CycleResult {
     cycleId: number;
@@ -152,9 +158,23 @@ export class CognitiveScheduler {
         
         // CRITICAL: Wait for VS Code Extension Host to stabilize
         // Without this delay, timers are registered but never fire
+        console.log('[P0-CORE-01B] 🔥 CognitiveScheduler.start() called');
         this.logger.system('⏳ Waiting 2s for Extension Host to stabilize...', '⏳');
         await new Promise(resolve => setTimeout(resolve, 2000));
+        console.log('[P0-CORE-01B] ✅ Extension Host stabilized');
         this.logger.system('✅ Extension Host ready', '✅');
+        
+        // 🗂️ P0-CORE-01: Load kernel artifacts at boot
+        console.log('[P0-CORE-01B] 🗂️ Attempting to load kernel artifacts...');
+        this.logger.system('🗂️  Loading kernel artifacts...', '🗂️');
+        try {
+            await this.loadArtifacts();
+            console.log('[P0-CORE-01B] ✅ Artifacts loaded successfully');
+            this.logger.system('✅ Kernel artifacts loaded', '✅');
+        } catch (artifactError) {
+            console.log('[P0-CORE-01B] ⚠️ Artifact loading failed:', artifactError);
+            this.logger.warning(`⚠️  No kernel artifacts found (first boot or reset): ${artifactError}`);
+        }
         
         // Phase E2.3: Initialize cache index on first start
         this.logger.system('📇 Initializing cache index...', '📇');
@@ -217,12 +237,29 @@ export class CognitiveScheduler {
         this.logger.system(`🧪 Registering cycle timer (${periodMs}ms)...`, '🧪');
         this.timerRegistry.registerInterval(
             'kernel:cognitive-cycle',
-            () => {
-                this.runCycle();
+            async () => {
+                this.logger.system("🔥 [TIMER] setInterval callback triggered", "🔥");
+                
+                try {
+                    const result = await this.runCycle();
+                    this.logger.system(`🔥 [TIMER] runCycle() resolved: ${JSON.stringify(result)}`, "🔥");
+                } catch (err) {
+                    this.logger.system(`🔥 [TIMER] runCycle() threw: ${err}`, "🔥");
+                }
             },
             periodMs
         );
         this.logger.system('✅ Cycle timer registered successfully', '✅');
+        
+        // 🔥 TEST MODE: Force immediate first cycle execution
+        this.logger.system('🔥 TEST MODE: Forcing immediate first cycle...', '🔥');
+        this.runCycle()
+            .then((result) => {
+                this.logger.system(`🔥 TEST MODE: First cycle completed (success: ${result.success})`, '🔥');
+            })
+            .catch((error) => {
+                this.logger.error(`🔥 TEST MODE: First cycle failed: ${error}`);
+            });
         
         // 🧠 Watchdog: Check if scheduler is still active every minute
         // If no cycle executed for 2x interval → auto-restart
@@ -383,140 +420,153 @@ export class CognitiveScheduler {
      * Run a complete cognitive cycle
      */
     async runCycle(): Promise<CycleResult> {
+        this.logger.system("🔥 [runCycle] Entered runCycle()", "🔥");
+        
         if (this.isRunning) {
-            this.logger.warning('Cycle already running, skipping');
+            this.logger.system("🔥 [runCycle] SKIPPED — isRunning=true", "🔥");
             return this.createSkippedResult();
         }
         
         this.isRunning = true;
-        this.cycleCount++;
-        this.logger.cycleStart(this.cycleCount);
+        this.logger.system('🔥 [DEBUG] isRunning set to true, starting cycle...', '🔥');
         
-        const startTime = Date.now();
-        const result: CycleResult = {
-            cycleId: this.cycleCount,
-            startedAt: new Date().toISOString(),
-            completedAt: '',
-            duration: 0,
-            phases: [],
-            inputHash: '',
-            success: false
-        };
-        
+        // ✅ P0-HARDENING-01: Outermost try/finally to guarantee isRunning reset
         try {
-            // Calculate input hash for idempotence
-            result.inputHash = await this.calculateInputHash();
+            this.cycleCount++;
+            this.logger.cycleStart(this.cycleCount);
+            this.logger.system('🔥 [DEBUG] After cycleStart(), before calculating input hash...', '🔥');
             
-            // Skip if same input as last cycle (idempotence)
-            if (result.inputHash === this.lastInputHash) {
-                this.logger.system('⏭️ Skipping cycle (same input hash)', '⏭️');
-                result.success = true;
-                result.phases.push({
-                    name: 'idempotence-skip',
-                    duration: 0,
-                    success: true
-                });
-                return result;
-            }
+            const startTime = Date.now();
+            const result: CycleResult = {
+                cycleId: this.cycleCount,
+                startedAt: new Date().toISOString(),
+                completedAt: '',
+                duration: 0,
+                phases: [],
+                inputHash: '',
+                success: false
+            };
             
-            this.lastInputHash = result.inputHash;
-            
-            // Phase 1: Pattern Learning
-            const patternPhase = await this.runPhase('pattern-learning', async () => {
-                const engine = new PatternLearningEngine(this.workspaceRoot);
-                const patterns = await engine.analyzePatterns();
+            try {
+                // Calculate input hash for idempotence
+                this.logger.system('🔥 [DEBUG] Calling calculateInputHash()...', '🔥');
+                result.inputHash = await this.calculateInputHash();
+                this.logger.system(`🔥 [DEBUG] calculateInputHash() returned: ${result.inputHash}`, '🔥');
                 
-                // Phase E2.7: Track pattern evolution (History Enrichment)
-                try {
-                    await this.patternEvolutionTracker.trackChanges(patterns, result.cycleId);
-                } catch (evolutionError) {
-                    this.logger.warning(`Pattern evolution tracking failed (non-critical): ${evolutionError}`);
+                // Skip if same input as last cycle (idempotence)
+                if (result.inputHash === this.lastInputHash) {
+                    this.logger.system('⏭️ Skipping cycle (same input hash)', '⏭️');
+                    result.success = true;
+                    result.phases.push({
+                        name: 'idempotence-skip',
+                        duration: 0,
+                        success: true
+                    });
+                    return result;
                 }
                 
-                return { patternsDetected: patterns.length, patterns };
-            });
-            result.phases.push(patternPhase);
-            this.logger.phase('pattern-learning', this.cycleCount, patternPhase.metrics?.patternsDetected || 0, patternPhase.duration);
+                this.lastInputHash = result.inputHash;
+                
+                // Phase 1: Pattern Learning
+                const patternPhase = await this.runPhase('pattern-learning', async () => {
+                    const engine = new PatternLearningEngine(this.workspaceRoot);
+                    const patterns = await engine.analyzePatterns();
+                    
+                    // Phase E2.7: Track pattern evolution (History Enrichment)
+                    try {
+                        await this.patternEvolutionTracker.trackChanges(patterns, result.cycleId);
+                    } catch (evolutionError) {
+                        this.logger.warning(`Pattern evolution tracking failed (non-critical): ${evolutionError}`);
+                    }
+                    
+                    return { patternsDetected: patterns.length, patterns };
+                });
+                result.phases.push(patternPhase);
+                this.logger.phase('pattern-learning', this.cycleCount, patternPhase.metrics?.patternsDetected || 0, patternPhase.duration);
+                
+                // Phase 2: Correlation
+                const correlationPhase = await this.runPhase('correlation', async () => {
+                    const engine = new CorrelationEngine(this.workspaceRoot);
+                    const correlations = await engine.analyze();
+                    // No correlations is normal for new workspaces or workspaces with limited activity
+                    // CorrelationEngine already logs internally if needed
+                    return { correlationsFound: correlations.length, correlations };
+                });
+                result.phases.push(correlationPhase);
+                this.logger.phase('correlation', this.cycleCount, correlationPhase.metrics?.correlationsFound || 0, correlationPhase.duration);
+                
+                // Phase 3: Forecasting (using persistent engine with adaptive baseline)
+                const forecastPhase = await this.runPhase('forecasting', async () => {
+                    const forecasts = await this.forecastEngine.generate();
+                    return { forecastsGenerated: forecasts.length, forecasts };
+                });
+                result.phases.push(forecastPhase);
+                this.logger.phase('forecasting', this.cycleCount, forecastPhase.metrics?.forecastsGenerated || 0, forecastPhase.duration);
+                
+                // Phase 4: ADR Synthesis
+                const adrPhase = await this.runPhase('adr-synthesis', async () => {
+                    const generator = new ADRGeneratorV2(this.workspaceRoot);
+                    const proposals = await generator.generateProposals();
+                    return { adrsGenerated: proposals.length, proposals };
+                });
+                result.phases.push(adrPhase);
+                this.logger.phase('adr-synthesis', this.cycleCount, adrPhase.metrics?.adrsGenerated || 0, adrPhase.duration);
+                
+                result.success = true;
+                
+            } catch (error) {
+                result.success = false;
+                this.logger.error(`Cycle failed: ${error}`);
+            } finally {
+                result.completedAt = new Date().toISOString();
+                result.duration = Date.now() - startTime;
+                
+                // Update watchdog timestamp (successful or not, we ran)
+                this.lastCycleTime = Date.now();
+            }
             
-            // Phase 2: Correlation
-            const correlationPhase = await this.runPhase('correlation', async () => {
-                const engine = new CorrelationEngine(this.workspaceRoot);
-                const correlations = await engine.analyze();
-                // No correlations is normal for new workspaces or workspaces with limited activity
-                // CorrelationEngine already logs internally if needed
-                return { correlationsFound: correlations.length, correlations };
-            });
-            result.phases.push(correlationPhase);
-            this.logger.phase('correlation', this.cycleCount, correlationPhase.metrics?.correlationsFound || 0, correlationPhase.duration);
+            // Aggregate cycle summary and append to cycles.jsonl (CycleAggregator)
+            await this.aggregateAndPersistCycle(result);
             
-            // Phase 3: Forecasting (using persistent engine with adaptive baseline)
-            const forecastPhase = await this.runPhase('forecasting', async () => {
-                const forecasts = await this.forecastEngine.generate();
-                return { forecastsGenerated: forecasts.length, forecasts };
-            });
-            result.phases.push(forecastPhase);
-            this.logger.phase('forecasting', this.cycleCount, forecastPhase.metrics?.forecastsGenerated || 0, forecastPhase.duration);
+            // Extract phase counts for cycle summary
+            const phases = {
+                patterns: result.phases.find(p => p.name === 'pattern-learning')?.metrics?.patternsDetected || 0,
+                correlations: result.phases.find(p => p.name === 'correlation')?.metrics?.correlationsFound || 0,
+                forecasts: result.phases.find(p => p.name === 'forecasting')?.metrics?.forecastsGenerated || 0,
+                adrs: result.phases.find(p => p.name === 'adr-synthesis')?.metrics?.adrsGenerated || 0
+            };
             
-            // Phase 4: ADR Synthesis
-            const adrPhase = await this.runPhase('adr-synthesis', async () => {
-                const generator = new ADRGeneratorV2(this.workspaceRoot);
-                const proposals = await generator.generateProposals();
-                return { adrsGenerated: proposals.length, proposals };
-            });
-            result.phases.push(adrPhase);
-            this.logger.phase('adr-synthesis', this.cycleCount, adrPhase.metrics?.adrsGenerated || 0, adrPhase.duration);
+            // Mock health data (will be replaced by real HealthMonitor in future)
+            const health = {
+                drift: Math.random() * 0.5, // Mock: 0-0.5
+                coherence: 0.7 + Math.random() * 0.3, // Mock: 0.7-1.0
+                status: result.success ? 'stable' : 'error'
+            };
             
-            result.success = true;
+            this.logger.cycleEnd(this.cycleCount, phases, health);
             
-        } catch (error) {
-            result.success = false;
-            this.logger.error(`Cycle failed: ${error}`);
+            // Phase E2.2: Real feedback loop every 100 cycles
+            if (result.cycleId % 100 === 0) {
+                await this.applyFeedbackLoop(result.cycleId);
+                
+                // Log checkpoint summary
+                const timestamp = new Date().toISOString().substring(11, 23);
+                this.logger.getChannel().appendLine('');
+                this.logger.getChannel().appendLine(`[${timestamp}] ═══════════════════════════════════════`);
+                this.logger.getChannel().appendLine(`[${timestamp}] 🔍 Checkpoint: Cycle ${result.cycleId}`);
+                this.logger.getChannel().appendLine(`[${timestamp}] 📊 Baseline: ${this.forecastEngine.metrics.forecast_precision.toFixed(3)}`);
+                this.logger.getChannel().appendLine(`[${timestamp}] 📈 Improvement: ${this.forecastEngine.metrics.improvement_rate >= 0 ? '+' : ''}${this.forecastEngine.metrics.improvement_rate.toFixed(4)}`);
+                this.logger.getChannel().appendLine(`[${timestamp}] 📦 Total Evals: ${this.forecastEngine.metrics.total_forecasts}`);
+                this.logger.getChannel().appendLine(`[${timestamp}] ═══════════════════════════════════════`);
+                this.logger.getChannel().appendLine('');
+            }
+            
+            return result;
+            
         } finally {
+            // ✅ P0-HARDENING-01: Guaranteed reset even if unhandled error occurs
             this.isRunning = false;
-            result.completedAt = new Date().toISOString();
-            result.duration = Date.now() - startTime;
-            
-            // Update watchdog timestamp (successful or not, we ran)
-            this.lastCycleTime = Date.now();
         }
-        
-        // Aggregate cycle summary and append to cycles.jsonl (CycleAggregator)
-        await this.aggregateAndPersistCycle(result);
-        
-        // Extract phase counts for cycle summary
-        const phases = {
-            patterns: result.phases.find(p => p.name === 'pattern-learning')?.metrics?.patternsDetected || 0,
-            correlations: result.phases.find(p => p.name === 'correlation')?.metrics?.correlationsFound || 0,
-            forecasts: result.phases.find(p => p.name === 'forecasting')?.metrics?.forecastsGenerated || 0,
-            adrs: result.phases.find(p => p.name === 'adr-synthesis')?.metrics?.adrsGenerated || 0
-        };
-        
-        // Mock health data (will be replaced by real HealthMonitor in future)
-        const health = {
-            drift: Math.random() * 0.5, // Mock: 0-0.5
-            coherence: 0.7 + Math.random() * 0.3, // Mock: 0.7-1.0
-            status: result.success ? 'stable' : 'error'
-        };
-        
-        this.logger.cycleEnd(this.cycleCount, phases, health);
-        
-        // Phase E2.2: Real feedback loop every 100 cycles
-        if (result.cycleId % 100 === 0) {
-            await this.applyFeedbackLoop(result.cycleId);
-            
-            // Log checkpoint summary
-            const timestamp = new Date().toISOString().substring(11, 23);
-            this.logger.getChannel().appendLine('');
-            this.logger.getChannel().appendLine(`[${timestamp}] ═══════════════════════════════════════`);
-            this.logger.getChannel().appendLine(`[${timestamp}] 🔍 Checkpoint: Cycle ${result.cycleId}`);
-            this.logger.getChannel().appendLine(`[${timestamp}] 📊 Baseline: ${this.forecastEngine.metrics.forecast_precision.toFixed(3)}`);
-            this.logger.getChannel().appendLine(`[${timestamp}] 📈 Improvement: ${this.forecastEngine.metrics.improvement_rate >= 0 ? '+' : ''}${this.forecastEngine.metrics.improvement_rate.toFixed(4)}`);
-            this.logger.getChannel().appendLine(`[${timestamp}] 📦 Total Evals: ${this.forecastEngine.metrics.total_forecasts}`);
-            this.logger.getChannel().appendLine(`[${timestamp}] ═══════════════════════════════════════`);
-            this.logger.getChannel().appendLine('');
-        }
-        
-        return result;
     }
     
     /**
@@ -650,6 +700,16 @@ export class CognitiveScheduler {
                 }
             }
             
+            // 🗂️ P0-CORE-01: Write kernel artifacts (every 10 cycles)
+            if (result.cycleId % 10 === 0) {
+                try {
+                    await this.writeArtifacts(result);
+                    this.logger.system(`💾 Kernel artifacts written (cycle ${result.cycleId})`, '💾');
+                } catch (artifactError) {
+                    this.logger.warning(`⚠️  Failed to write kernel artifacts: ${artifactError}`);
+                }
+            }
+            
             // Phase E2.4: Run normalization (every 100 cycles)
             if (result.cycleId % 100 === 0) {
                 try {
@@ -744,6 +804,128 @@ export class CognitiveScheduler {
         } catch (error) {
             this.logger.error(`[E2.2] Feedback loop failed: ${error}`);
         }
+    }
+    
+    /**
+     * 🗂️ P0-CORE-01: Load kernel artifacts from disk
+     * Restores state.json.gz, universals.json.gz, cognitive_history.json.gz
+     */
+    private async loadArtifacts(): Promise<void> {
+        console.log('[P0-CORE-01B] 🔥 loadArtifacts() entered');
+        const artifactsDir = path.join(this.workspaceRoot, '.reasoning_rl4', 'artifacts');
+        console.log('[P0-CORE-01B] Artifacts dir:', artifactsDir);
+        
+        // Load state.json.gz
+        const stateFile = path.join(artifactsDir, 'state.json.gz');
+        console.log('[P0-CORE-01B] Checking state file:', stateFile);
+        console.log('[P0-CORE-01B] File exists?', fs.existsSync(stateFile));
+        if (fs.existsSync(stateFile)) {
+            console.log('[P0-CORE-01B] Reading state.json.gz...');
+            const compressed = fs.readFileSync(stateFile);
+            const decompressed = await gunzip(compressed);
+            const state = JSON.parse(decompressed.toString('utf-8'));
+            console.log('[P0-CORE-01B] State loaded:', state);
+            
+            // Restore cycle count
+            if (state.cycleCount) {
+                this.cycleCount = state.cycleCount;
+                console.log('[P0-CORE-01B] 📊 Restored cycle count:', this.cycleCount);
+                this.logger.system(`📊 Restored cycle count: ${this.cycleCount}`, '📊');
+            }
+        } else {
+            console.log('[P0-CORE-01B] ⚠️ state.json.gz not found');
+        }
+        
+        // Load universals.json.gz (patterns, correlations, forecasts)
+        const universalsFile = path.join(artifactsDir, 'universals.json.gz');
+        if (fs.existsSync(universalsFile)) {
+            const compressed = fs.readFileSync(universalsFile);
+            const decompressed = await gunzip(compressed);
+            const universals = JSON.parse(decompressed.toString('utf-8'));
+            
+            this.logger.system(`📊 Loaded universals: ${universals.patterns?.length || 0} patterns, ${universals.correlations?.length || 0} correlations, ${universals.forecasts?.length || 0} forecasts`, '📊');
+        }
+        
+        // Load cognitive_history.json.gz (last 100 cycles)
+        const historyFile = path.join(artifactsDir, 'cognitive_history.json.gz');
+        if (fs.existsSync(historyFile)) {
+            const compressed = fs.readFileSync(historyFile);
+            const decompressed = await gunzip(compressed);
+            const history = JSON.parse(decompressed.toString('utf-8'));
+            
+            this.logger.system(`📊 Loaded cognitive history: ${history.cycles?.length || 0} cycles`, '📊');
+        }
+    }
+    
+    /**
+     * 🗂️ P0-CORE-01: Write kernel artifacts to disk
+     * Saves state.json.gz, universals.json.gz, cognitive_history.json.gz
+     */
+    private async writeArtifacts(result: CycleResult): Promise<void> {
+        const artifactsDir = path.join(this.workspaceRoot, '.reasoning_rl4', 'artifacts');
+        
+        // Ensure artifacts directory exists
+        if (!fs.existsSync(artifactsDir)) {
+            fs.mkdirSync(artifactsDir, { recursive: true });
+        }
+        
+        // Write state.json.gz
+        const state = {
+            version: '3.5.11',
+            cycleCount: this.cycleCount,
+            lastCycleId: result.cycleId,
+            lastInputHash: result.inputHash,
+            timestamp: result.completedAt
+        };
+        const stateJson = JSON.stringify(state, null, 2);
+        const stateCompressed = await gzip(Buffer.from(stateJson, 'utf-8'));
+        fs.writeFileSync(path.join(artifactsDir, 'state.json.gz'), stateCompressed);
+        
+        // Write universals.json.gz (patterns, correlations, forecasts from this cycle)
+        const universals = {
+            patterns: result.phases.find(p => p.name === 'pattern-learning')?.metrics?.patterns || [],
+            correlations: result.phases.find(p => p.name === 'correlation')?.metrics?.correlations || [],
+            forecasts: result.phases.find(p => p.name === 'forecasting')?.metrics?.forecasts || [],
+            timestamp: result.completedAt
+        };
+        const universalsJson = JSON.stringify(universals, null, 2);
+        const universalsCompressed = await gzip(Buffer.from(universalsJson, 'utf-8'));
+        fs.writeFileSync(path.join(artifactsDir, 'universals.json.gz'), universalsCompressed);
+        
+        // Write cognitive_history.json.gz (append current cycle, keep last 100)
+        const historyFile = path.join(artifactsDir, 'cognitive_history.json.gz');
+        let history: any = { cycles: [] };
+        
+        // Load existing history if present
+        if (fs.existsSync(historyFile)) {
+            try {
+                const compressed = fs.readFileSync(historyFile);
+                const decompressed = await gunzip(compressed);
+                history = JSON.parse(decompressed.toString('utf-8'));
+            } catch (error) {
+                // If decompression fails, start fresh
+                history = { cycles: [] };
+            }
+        }
+        
+        // Append current cycle
+        history.cycles.push({
+            cycleId: result.cycleId,
+            timestamp: result.completedAt,
+            duration: result.duration,
+            inputHash: result.inputHash,
+            success: result.success,
+            phases: result.phases
+        });
+        
+        // Keep only last 100 cycles
+        if (history.cycles.length > 100) {
+            history.cycles = history.cycles.slice(-100);
+        }
+        
+        const historyJson = JSON.stringify(history, null, 2);
+        const historyCompressed = await gzip(Buffer.from(historyJson, 'utf-8'));
+        fs.writeFileSync(historyFile, historyCompressed);
     }
 }
 

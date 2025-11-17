@@ -1,16 +1,18 @@
 ---
-version: 3.4
-updated: '2025-11-17T14:50:00.000Z'
+version: 3.5
+updated: '2025-11-17T19:45:00.000Z'
 confidence: 1.0
-deviation_mode: free
-current_phase: "Transition to P0 Production-Ready Mode"
-sprint_completed_on: '2025-11-17T14:50:00.000Z'
+deviation_mode: exploratory
+current_phase: "Sprint P0-CORE: Production Kernel"
+sprint_started_on: '2025-11-17T19:45:00.000Z'
+active_sprint: "P0-CORE"
+next_phase_ready: null
 ---
 
 # Plan — Strategic Vision
 
 ## Phase
-✅ E3.4 - COMPLETED | ✅ E4 - COMPLETED | ✅ E4.1 - Memory Safety (COMPLETED) | 🎯 E5 - Pattern Learning UI (Paused)
+✅ E3.4 - COMPLETED | ✅ E4 - COMPLETED | ✅ E4.1 - Memory Safety (COMPLETED) | ✅ P0-HARDENING (COMPLETED) | ✅ P1-INTEGRITY (COMPLETED) | 🎯 P0-CORE - Production Kernel (ACTIVE)
 
 ## Goal (E4 - COMPLETED ✅)
 **OBJECTIF ATTEINT** — Production MVP prêt :
@@ -56,6 +58,65 @@ sprint_completed_on: '2025-11-17T14:50:00.000Z'
 **✅ Extension version:** v3.5.11 active depuis 2025-11-17T13:42  
 **✅ Sprint complété:** 2025-11-17T14:50
 
+## Goal (P0-CORE - Production Kernel) 🎯 ACTIVE
+**OBJECTIF: Rendre le kernel RL4 production-ready avec diagnostic complet**
+
+### Problème Identifié
+🔴 **Cognitive Loop Inerte:** 721 cycles exécutés avec count: 0 pour toutes les phases → kernel tourne à vide
+🔴 **Kernel Status Invisible:** Utilisateur ne peut pas diagnostiquer l'état du kernel (SAFE MODE, cycles, phases)
+🟡 **Artifacts Manquants:** state.json.gz, universals.json.gz jamais générés → recalibration LLM impossible
+🟢 **Stabilité Confirmée:** RAM stable (133 MB après 14h), ledger intact, patches P0/P1 appliqués
+
+**✅ DIAGNOSTIQUÉ:** Analyse complète effectuée (2025-11-17T19:30)
+
+### Solution: 7 Tâches Critiques (12-14h estimé)
+1. **P0-CORE-00: Fix Cognitive Loop Inertia** (2-4h) 🔴 CRITIQUE
+   - Diagnostic pourquoi PatternLearning, Correlation, Forecast, ADR retournent []
+   - Réparer les 4 engines pour qu'ils produisent des résultats
+   
+2. **P0-CORE-03: WebView Bridge v1** (2h) 🔴 CRITIQUE
+   - Implémenter rl4:getStatus → KernelStatus → rl4:status
+   - Afficher statut kernel dans Control Tab
+   
+3. **P0-CORE-02: Kernel Ready Protocol** (1.5h) 🔴 HIGH
+   - Implémenter kernel.init(), loadArtifacts(), verifyLedger(), ready flag
+   - Bloquer WebView jusqu'à kernel.ready
+   
+4. **P0-CORE-01: Kernel Artifact Engine** (2h) 🟡 P1
+   - Générer state.json.gz, universals.json.gz, cognitive_history.json.gz
+   - writeAtomic() avec checksum, loadWithRetry()
+   
+5. **P0-CORE-06: Kernel Sovereignty Mode** (1.5h) 🟡 P1
+   - Émettre kernel:not-ready si appelé trop tôt
+   - Auto-restart WebView quand kernel ready
+   
+6. **P0-CORE-05: Production Scheduler** (2h) 🟡 P1
+   - Adaptive intervals (10s → 15s → 2min → 10min)
+   - Burst mode + cooldown si memory > 450 MB
+   
+7. **P0-CORE-04: Cognitive Loop Full Mode** (identique à CORE-00)
+
+## Goal (P0-HARDENING - Production Stability) ✅ COMPLETED
+**OBJECTIF ATTEINT** — Kernel durci contre deadlocks et corruption
+
+### Sprints Complétés
+1. **P0-HARDENING-01:** isRunning reset garanti (CognitiveScheduler.ts)
+2. **P0-HARDENING-02:** Eager Merkle cache load (RBOMLedger.ts)
+3. **P0-HARDENING-03:** Production config defaults (config.ts)
+
+**✅ Sprint complété:** 2025-11-17T15:40
+
+## Goal (P1-INTEGRITY - Ledger Hardening) ✅ COMPLETED
+**OBJECTIF ATTEINT** — Intégrité ledger garantie
+
+### Sprints Complétés
+1. **P1-INTEGRITY-01:** FALSE POSITIVE (pas de circular Merkle bug) — ADR-016
+2. **P1-INTEGRITY-02 PATCH 2:** Flush-before-cache-update avec retry logic
+3. **P1-INTEGRITY-02 PATCH 5:** validateLastLine() dans AppendOnlyWriter
+4. **P1-INTEGRITY-02 PATCH 6:** SAFE MODE avec startup verification
+
+**✅ Sprint complété:** 2025-11-17T16:30
+
 ## Goal (E5 - Pattern Learning UI) 🎯 PAUSED
 **OBJECTIF: Exposer Pattern Learning dans l'UI**
 
@@ -63,23 +124,7 @@ sprint_completed_on: '2025-11-17T14:50:00.000Z'
 ✅ **Backend Ready:** TerminalPatternsLearner (476 lignes) fonctionne et apprend
 ❌ **UI Missing:** Utilisateur ne voit JAMAIS les patterns appris ni les suggestions
 
-**✅ UNBLOCKED:** Sprint E4.1 Memory Safety complété (2025-11-17T14:50)
-
-### Solution: 3 Phases
-1. **Phase 1: Terminal Patterns Display** (2h)
-   - Onglet "Patterns" dans Insights Tab
-   - Affichage patterns appris (table + cards)
-   - Section Anomalies (success rate drops, unusual durations)
-
-2. **Phase 2: Auto-Suggestions UI** (2h)
-   - Détection tâches sans `@rl4:completeWhen`
-   - Section "💡 Suggestions" dans Dev Tab
-   - Bouton "Apply Suggestion" pour auto-compléter
-
-3. **Phase 3: Ad-Hoc Actions Tracker** (2h)
-   - Tracking actions non planifiées
-   - UI "Suggested from Activity"
-   - Conversion ad-hoc → tâches formelles
+**⏸️ PAUSED:** Priorité donnée à P0-CORE (kernel production-ready d'abord)
 
 ## Timeline
 **Phase E3.4:**

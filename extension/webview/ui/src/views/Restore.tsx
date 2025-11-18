@@ -11,12 +11,10 @@ export function Restore() {
     : null;
 
   const handleDownload = async (entry: any) => {
-    console.log('[RL4 Restore] Download requested for cycle:', entry.cycleId);
     // TODO: Implement download via postMessage to extension
   };
 
   const handleOpenInCursor = async (entry: any) => {
-    console.log('[RL4 Restore] Open in Cursor requested for cycle:', entry.cycleId);
     // TODO: Implement via postMessage to extension
   };
 

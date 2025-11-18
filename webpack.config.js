@@ -6,8 +6,7 @@ module.exports = {
   entry: './extension/extension.ts',
   output: {
     path: path.resolve(__dirname, 'out'),
-    filename: 'extension.js',
-    libraryTarget: 'commonjs2'
+    filename: 'extension.js'
   },
   externals: {
     vscode: 'commonjs vscode',

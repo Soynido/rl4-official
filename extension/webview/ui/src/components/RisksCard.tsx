@@ -18,10 +18,10 @@ interface RisksProps {
 export const RisksCard: React.FC<RisksProps> = ({ risks }) => {
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case 'critical': return '#ff4d4d';
-      case 'warning': return '#ff9500';
-      case 'ok': return '#00c864';
-      default: return '#667eea';
+      case 'critical': return 'var(--vscode-inputValidation-errorBorder)';
+      case 'warning': return 'var(--vscode-inputValidation-warningBorder)';
+      case 'ok': return 'var(--vscode-inputValidation-infoBorder)';
+      default: return 'var(--vscode-foreground)';
     }
   };
 

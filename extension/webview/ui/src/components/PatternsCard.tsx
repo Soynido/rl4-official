@@ -100,15 +100,15 @@ export const PatternsCard: React.FC<PatternsCardProps> = ({ patterns, anomalies 
 
   const getPhaseColor = (phase: string): string => {
     const colors: Record<string, string> = {
-      'setup': '#3b82f6',
-      'build': '#8b5cf6',
-      'test': '#10b981',
-      'debug': '#f59e0b',
-      'deploy': '#ef4444',
-      'document': '#6366f1',
-      'implementation': '#06b6d4'
+      'setup': 'var(--vscode-textLink-foreground)',
+      'build': 'var(--vscode-textLink-foreground)',
+      'test': 'var(--vscode-testing-iconPassed)',
+      'debug': 'var(--vscode-editorWarning-foreground)',
+      'deploy': 'var(--vscode-editorError-foreground)',
+      'document': 'var(--vscode-textLink-foreground)',
+      'implementation': 'var(--vscode-textLink-foreground)'
     };
-    return colors[phase] || '#6b7280';
+    return colors[phase] || 'var(--vscode-descriptionForeground)';
   };
 
   return (

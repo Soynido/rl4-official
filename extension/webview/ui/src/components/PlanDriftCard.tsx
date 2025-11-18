@@ -29,9 +29,9 @@ export const PlanDriftCard: React.FC<PlanDriftProps> = ({
   changes 
 }) => {
   const getDriftColor = () => {
-    if (percentage > threshold * 2) return '#ff4d4d'; // Critical (>50% for flexible)
-    if (percentage > threshold) return '#ff9500'; // High (>25% for flexible)
-    return '#00c864'; // Normal
+    if (percentage > threshold * 2) return 'var(--vscode-inputValidation-errorBorder)'; // Critical (>50% for flexible)
+    if (percentage > threshold) return 'var(--vscode-inputValidation-warningBorder)'; // High (>25% for flexible)
+    return 'var(--vscode-inputValidation-infoBorder)'; // Normal
   };
 
   const getDriftEmoji = () => {

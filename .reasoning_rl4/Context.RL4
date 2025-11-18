@@ -1,10 +1,10 @@
 ---
-version: 3.7
-updated: '2025-11-17T19:45:00Z'
-confidence: 1.0
+version: 3.8
+updated: '2025-11-18T14:40:32.250Z'
+confidence: 0.50
 bias: 35.71
-last_sync: '2025-11-17T19:45:00Z'
-sync_status: "P0-CORE sprint initialized (v3.5.11)"
+last_sync: '2025-11-18T14:40:32.250Z'
+sync_status: "Snapshot analysis completed (P0-CORE active)"
 active_sprint: "P0-CORE (active)"
 next_phase_ready: null
 ---
@@ -13,194 +13,218 @@ next_phase_ready: null
 
 ## KPIs (LLM-Calculated)
 
-### Cognitive Load: 15% (Low)
-- Bursts: 1 (Sprint E4.1 Memory Safety)
-- Switches: 1 (E5 → E4.1 prioritaire)
-- Parallel Tasks: 0 (Focus sur memory bugs)
-- Uncommitted Files: 3 fichiers (Plan.RL4, Tasks.RL4, Context.RL4 mis à jour)
+### Cognitive Load: 50% (Normal)
+- Bursts: 0 (Pas d'activité récente intense détectée)
+- Switches: 0 (Pas de changements de contexte récents)
+- Parallel Tasks: 0 (Aucune tâche en cours d'exécution)
+- Uncommitted Files: 50 fichiers (git status)
 
 **Formule appliquée:**
 ```
-load = (1/10 * 0.3) + (1/50 * 0.2) + (0/3 * 0.3) + (3/20 * 0.2)
-     = (0.03) + (0.004) + (0) + (0.03)
-     = 0.064 → 15% (low)
+load = (0/10 * 0.3) + (0/50 * 0.2) + (0/3 * 0.3) + (50/20 * 0.2)
+     = (0) + (0) + (0) + (0.5)
+     = 0.5 → 50% (normal)
 ```
 
 **Analysis:**
-- 🔴 **BUG CRITIQUE DÉTECTÉ** — Memory leaks 770 MB / 1,18 GB après 1h30
-- 🔴 **Sprint E4.1 lancé** — Memory Safety (3h, bug critique P0)
-- ⏸️ **Sprint E5 pausé** — Pattern Learning UI (reprise après E4.1)
-- 🟢 **Cognitive Load acceptable** — Switch justifié (bug bloquant)
+- 🟡 **Charge cognitive modérée** — Principalement due aux fichiers non commités (50)
+- 🟢 **Pas de bursts récents** — Activité stable sans pics d'intensité
+- 🟢 **Pas de tâches parallèles** — Focus clair sur sprint P0-CORE
+- 🟡 **Fichiers non commités élevés** — Risque de perte de travail si crash
 
-### Next Steps (Flexible Mode — 25% threshold)
+### Next Steps (Exploratory Mode — 50% threshold)
 
-**Mode actuel:** FLEXIBLE ⚖️
+**Mode actuel:** EXPLORATORY 🔬
 
-**P0 Tasks (Sprint E4.1 - Memory Safety - 3h):**
-1. [P0] 🔴 **Memory Monitoring** (15min)
-   - Créer MemoryMonitor.ts + MemoryWatchdog.ts
-   - Baseline + alerts > 500 MB
+**P0 Tasks (Sprint P0-CORE - Production Kernel - 12-14h):**
+1. [P0] 🔴 **P0-CORE-00: Fix Cognitive Loop Inertia** (2-4h) — CRITIQUE
+   - Diagnostiquer pourquoi PatternLearning, Correlation, Forecast, ADR retournent []
+   - 31 cycles exécutés avec count: 0 pour toutes les phases → kernel tourne à vide
+   - Réparer les 4 engines pour qu'ils produisent des résultats
+   - @rl4:id=P0-CORE-00-patterns, P0-CORE-00-correlations, P0-CORE-00-forecasts, P0-CORE-00-adrs
    
-2. [P0] 🔴 **Disposables VS Code** (45min) — CRITIQUE
-   - Corriger IDEActivityListener + BuildMetricsListener
-   - Stocker disposables + dispose() propre
-   - Gain: -60% croissance extension-host
+2. [P0] 🔴 **P0-CORE-03: WebView Bridge v1** (2h) — CRITIQUE
+   - Implémenter rl4:getStatus → KernelStatus → rl4:status
+   - Afficher statut kernel dans Control Tab
+   - @rl4:id=P0-CORE-03-api, P0-CORE-03-scheduler, P0-CORE-03-handler, P0-CORE-03-ui
    
-3. [P0] 🔴 **ExecPool Buffers** (45min) — CRITIQUE
-   - Limiter stdout/stderr à 1 KB
-   - Rotation git_pool.jsonl après 5000 lignes
-   - Gain: -40% croissance extension-host
-   
-4. [P0] 🟡 **Console.log Production** (30min)
-   - Logger webview avec rotation (max 100 logs)
-   - Gain: -70% croissance renderer
-   
-5. [P0] 🟢 **JSONL Rotation** (30min)
-   - Rotation auto après 10K lignes + compression .gz
-   - Maintient fichiers actifs légers
+3. [P0] 🔴 **P0-CORE-02: Kernel Ready Protocol** (1.5h) — HIGH
+   - Implémenter kernel.init(), loadArtifacts(), verifyLedger(), ready flag
+   - Bloquer WebView jusqu'à kernel.ready
+   - @rl4:id=P0-CORE-02-protocol, P0-CORE-02-activate
 
-**Justification Sprint E4.1:**
-- 🚨 **Bug critique P0:** Extension crash certain après 2 mois (770 MB → 164 GB)
-- 🚨 **Bloquant pour E5:** Risque de crash pendant développement Pattern UI
-- ✅ **ROI massif:** -97% RAM (770 MB → 200 MB)
-- ✅ **Bias impact:** +6% (bien sous threshold 25%)
+**P1 Tasks (Sprint P0-CORE):**
+4. [P1] 🟡 **P0-CORE-01: Kernel Artifact Engine** (2h)
+   - Générer state.json.gz, universals.json.gz, cognitive_history.json.gz
+   - writeAtomic() avec checksum, loadWithRetry()
+   - @rl4:id=P0-CORE-01-writer, P0-CORE-01-loader, P0-CORE-01-integrate
 
-### Plan Drift: 6% (Correction bug critique)
+5. [P1] 🟡 **P0-CORE-05: Production Scheduler** (2h)
+   - Adaptive intervals (10s → 15s → 2min → 10min)
+   - Burst mode + cooldown si memory > 450 MB
+   - @rl4:id=P0-CORE-05-adaptive, P0-CORE-05-burst, P0-CORE-05-cooldown
 
-**Changements vs baseline E4:**
-- Phase: `E5 Pattern Learning UI` → `E4.1 Memory Safety` (bug critique ✅)
-- Goal: Exposer Pattern Learning → **Corriger fuites mémoire AVANT crash**
-- Scope: +5 fichiers (MemoryMonitor, fixes listeners, ExecPool, logger, rotation)
-- Timeline: +3h pour stabilité (investissement nécessaire)
-- Bias impact: +6% (threshold 25%, acceptable ✅)
+6. [P1] 🟡 **P0-CORE-06: Kernel Sovereignty Mode** (1.5h)
+   - Émettre kernel:not-ready si appelé trop tôt
+   - Auto-restart WebView quand kernel ready
+   - @rl4:id=P0-CORE-06-validation, P0-CORE-06-message, P0-CORE-06-ui
 
-**Justification drift:**
-```diff
-État découvert:
-+ Extension-host: 770 MB après 1h30 (❌ CRITIQUE)
-+ Renderer: 1,18 GB après 1h30 (❌ CRITIQUE)
-+ Projection 2 mois: 164 GB + 252 GB = 416 GB (💀 CRASH CERTAIN)
+**Justification Sprint P0-CORE:**
+- 🔴 **Problème critique:** 721 cycles exécutés avec count: 0 → kernel inerte
+- 🔴 **Observabilité manquante:** Utilisateur ne peut pas diagnostiquer l'état du kernel
+- 🟡 **Artifacts manquants:** state.json.gz, universals.json.gz jamais générés
+- 🟢 **Stabilité confirmée:** RAM stable (133 MB après 14h), ledger intact
+- ✅ **Bias actuel:** 35.71% (sous threshold 50% exploratory ✅)
 
-Root causes identifiées:
-+ Event listeners VS Code jamais disposés
-+ ExecPool buffers (2563 ops) jamais libérés
-+ Console.log accumulation renderer
-+ JSONL files croissance linéaire sans rotation
+### Plan Drift: 0% (Aligné avec Plan.RL4)
 
-Solution E4.1 (3h):
-+ Disposables propres (-60% extension-host)
-+ Buffer management (-40% extension-host)
-+ Logger rotation (-70% renderer)
-+ JSONL rotation (maintient < 10K lignes)
-+ Monitoring + alerts (prévention future)
+**Changements vs baseline Plan.RL4:**
+- Phase: `P0-CORE - Production Kernel` → **ACTIVE** (aligné ✅)
+- Goal: Rendre le kernel RL4 production-ready → **En cours** (aligné ✅)
+- Scope: 7 tâches critiques (12-14h estimé) → **Défini dans Tasks.RL4** (aligné ✅)
+- Timeline: Sprint démarré 2025-11-17T19:45 → **En cours** (aligné ✅)
+- Bias: 35.71% → **Sous threshold 50%** (acceptable ✅)
 
-Résultat: -97% RAM (770 MB → 200 MB)
-```
+**État actuel:**
+- ✅ Sprint P0-CORE initialisé (2025-11-17T19:45)
+- ✅ Toutes les tâches P0-CORE définies dans Tasks.RL4
+- ✅ Diagnostic complet effectué (2025-11-17T19:30)
+- ⏳ Aucune tâche P0-CORE complétée (toutes pending)
+- 🔴 Cognitive loop inerte confirmé (31 cycles avec count: 0)
 
-**Conclusion:** Bug critique P0 justifie drift +6%. Sprint E5 reprendra après stabilité.
+**Conclusion:** Aucune dérive. Sprint P0-CORE en cours selon plan.
 
 ### Risks
 
-- 🔴 **CRITIQUE: Memory leaks détectés** — Extension crash certain
-  - **Status:** 770 MB extension-host + 1,18 GB renderer après 1h30
-  - **Projection:** 416 GB après 2 mois → CRASH GARANTI
-  - **Action:** P0 Sprint E4.1 — Memory Safety (3h)
-  - **Impact:** Bloquant total, priorité absolue
+- 🔴 **CRITIQUE: Cognitive Loop Inerte** — Kernel tourne à vide
+  - **Status:** 31 cycles exécutés avec count: 0 pour toutes les phases (patterns, correlations, forecasts, adrs)
+  - **Impact:** Kernel ne produit aucun résultat, observabilité impossible
+  - **Action:** P0-CORE-00 — Diagnostiquer et réparer les 4 engines (2-4h)
+  - **Blocker:** Toutes les autres tâches P0-CORE dépendent de cette réparation
   
-- ⏸️ **MOYEN: Sprint E5 pausé** — Pattern Learning UI reporté
-  - **Context:** E4.1 Memory Safety doit être traité AVANT
-  - **Action:** Reprendre E5 après stabilité RAM
-  - **Impact:** Feature delay acceptable (stabilité > feature)
+- 🟡 **MOYEN: Fichiers non commités élevés** — Risque de perte de travail
+  - **Status:** 50 fichiers non commités (git status)
+  - **Impact:** Perte de travail en cas de crash ou corruption
+  - **Action:** Commit régulier des changements, surtout fichiers RL4
+  - **Recommandation:** Commit après chaque tâche P0 complétée
   
-- 🟢 **BAS: Bias impact +6%** — Acceptable en mode Flexible
-  - **Context:** Threshold = 25%, impact = 6%
-  - **Action:** Continuer E4.1, surveiller bias
-  - **Impact:** Marge confortable (19% restants)
+- 🟡 **MOYEN: Kernel Status Invisible** — Diagnostic impossible
+  - **Status:** Utilisateur ne peut pas voir l'état du kernel (SAFE MODE, cycles, phases)
+  - **Impact:** Impossible de diagnostiquer problèmes sans logs techniques
+  - **Action:** P0-CORE-03 — WebView Bridge v1 (2h)
+  - **Priorité:** HIGH (après P0-CORE-00)
+  
+- 🟢 **BAS: Memory stable** — Pas de fuites détectées récemment
+  - **Status:** RAM stable (133 MB après 14h selon Plan.RL4)
+  - **Impact:** Aucun risque immédiat
+  - **Action:** Continuer monitoring via MemoryMonitor
+  - **Note:** Sprint E4.1 Memory Safety complété (2025-11-17T14:50)
 
 ## Agent Observations
 
 ### 📊 État Actuel vs Plan
 
-**Phase E5 Status:** 🎯 **READY TO START** (Sprint Pattern Learning UI)
+**Phase P0-CORE Status:** 🎯 **ACTIVE** (Sprint Production Kernel)
 
-**Sprint E4 Results (2025-11-16 08:00):**
-- ✅ **Parse LLM Response:** Handler complet avec 4 formats + bouton UI
-- ✅ **Helper Scripts:** rl4-log.js (162 lignes) + rl4-log.sh (198 lignes)
-- ✅ **Documentation:** README_RL4_TERMINAL.md (443 lignes), README.md updated, RELEASE_NOTES created
-- ✅ **Duration:** 1h (ultra-rapide, backend déjà prêt)
+**Sprint P0-CORE Progress (2025-11-18 14:40):**
+- ✅ **Diagnostic complet:** Analyse effectuée (2025-11-17T19:30)
+- ✅ **Sprint initialisé:** Toutes les tâches P0-CORE définies dans Tasks.RL4
+- ⏳ **Aucune tâche complétée:** Toutes les tâches P0-CORE sont pending
+- 🔴 **Problème critique confirmé:** 31 cycles exécutés avec count: 0 pour toutes les phases
 
-**Gaps identifiés (E5):**
-- ❌ **Patterns invisibles:** Backend apprend, user ne voit rien
-- ❌ **Suggestions cachées:** Auto-suggestions existent mais pas d'UI
-- ❌ **Ad-Hoc perdu:** Actions non planifiées pas trackées
+**Gaps identifiés (P0-CORE):**
+- 🔴 **Cognitive Loop Inerte:** PatternLearning, Correlation, Forecast, ADR retournent []
+- 🔴 **Observabilité manquante:** Pas de moyen de voir l'état du kernel (SAFE MODE, cycles)
+- 🟡 **Artifacts manquants:** state.json.gz, universals.json.gz jamais générés
+- 🟢 **Stabilité confirmée:** RAM stable (133 MB après 14h), ledger intact
 
-**Blockers actuels:** Aucun 🎉
+**Blockers actuels:**
+- 🔴 **P0-CORE-00 bloquant:** Toutes les autres tâches dépendent de la réparation du cognitive loop
 
-**Sprint E5 (6h estimé):**
-1. 🔴 Patterns Tab (2h)
-2. 🟡 Auto-Suggestions UI (2h)
-3. 🟢 Ad-Hoc Tracker (2h)
+**Sprint P0-CORE (12-14h estimé):**
+1. 🔴 P0-CORE-00: Fix Cognitive Loop Inertia (2-4h) — CRITIQUE
+2. 🔴 P0-CORE-03: WebView Bridge v1 (2h) — CRITIQUE
+3. 🔴 P0-CORE-02: Kernel Ready Protocol (1.5h) — HIGH
+4. 🟡 P0-CORE-01: Kernel Artifact Engine (2h) — P1
+5. 🟡 P0-CORE-05: Production Scheduler (2h) — P1
+6. 🟡 P0-CORE-06: Kernel Sovereignty Mode (1.5h) — P1
+
 
 ### 🎯 Recommandations
 
-**Immédiat (Sprint E5 - 6h):**
+**Immédiat (Sprint P0-CORE - 12-14h):**
 
-1. **[P0] Créer Patterns Tab** (2h)
-   - Onglet "Patterns" dans Insights Tab
-   - Lire terminal-patterns.json via message handler
-   - PatternsCard component (table format)
-   - Section Anomalies avec color-coding
+1. **[P0] P0-CORE-00: Fix Cognitive Loop Inertia** (2-4h) — CRITIQUE
+   - Diagnostiquer pourquoi PatternLearningEngine.analyzePatterns() retourne []
+   - Diagnostiquer pourquoi CorrelationEngine.analyze() retourne []
+   - Diagnostiquer pourquoi ForecastEngine.generate() retourne []
+   - Diagnostiquer pourquoi ADRGeneratorV2.generateProposals() retourne []
+   - Réparer les 4 engines pour qu'ils produisent des résultats non vides
+   - Vérifier que cycles.jsonl montre count > 0 pour au moins 1 phase après fix
+   - Fichiers: extension/core/base/PatternLearningEngine.ts, CorrelationEngine.ts, ForecastEngine.ts, ADRGeneratorV2.ts
 
-2. **[P0] Auto-Suggestions UI** (2h)
-   - Fonction `suggestForTask()` dans TerminalPatternsLearner
-   - Section "💡 Suggestions" dans Dev Tab
-   - Bouton "Apply Suggestion" par tâche
-   - Handler `applySuggestion` dans extension.ts
+2. **[P0] P0-CORE-03: WebView Bridge v1** (2h) — CRITIQUE
+   - Créer KernelStatusAPI.ts avec getStatus() aggregator
+   - Ajouter CognitiveScheduler.getStatus() method
+   - Implémenter rl4:getStatus handler dans extension.ts
+   - Ajouter Kernel Status section dans WebView Control Tab
+   - Afficher cycle count, SAFE MODE status, last cycle timestamp
+   - Fichiers: extension/kernel/api/KernelStatusAPI.ts (NEW), CognitiveScheduler.ts, extension.ts, App.tsx
 
-3. **[P1] Ad-Hoc Tracker** (2h)
-   - Créer AdHocTracker.ts
-   - Support `# RL4_ACTION` dans rl4-log.sh
-   - Enrichir snapshot (AdaptivePromptBuilder)
-   - UI "Suggested from Activity" dans Dev Tab
+3. **[P0] P0-CORE-02: Kernel Ready Protocol** (1.5h) — HIGH
+   - Créer KernelReadyProtocol.ts avec init/loadArtifacts/verifyLedger
+   - Intégrer protocol dans extension.ts activation
+   - Bloquer WebView jusqu'à kernel.ready
+   - Fichiers: extension/kernel/api/KernelReadyProtocol.ts (NEW), extension.ts
 
 **Post-Sprint (P1):**
-4. [P1] Duration histogram (charts visuels) (1h)
-5. [P1] Command classification badges (color-coded) (30min)
-6. [P1] Release v3.6.0 avec "Pattern Learning UI" (15min)
+4. [P1] P0-CORE-01: Kernel Artifact Engine (2h)
+5. [P1] P0-CORE-05: Production Scheduler (2h)
+6. [P1] P0-CORE-06: Kernel Sovereignty Mode (1.5h)
 
 ### 💭 Insights
 
-**Ce qui a bien fonctionné (E4):**
-- ✅ Backend déjà prêt → Implémentation ultra-rapide (1h)
-- ✅ Documentation exhaustive (README Terminal 443 lignes)
-- ✅ Helper scripts bien conçus (Node.js + Bash)
-- ✅ Release notes professionnel (structure complète)
+**Ce qui a bien fonctionné (E4.1 Memory Safety):**
+- ✅ Sprint E4.1 complété (2025-11-17T14:50) — Memory leaks corrigés
+- ✅ RAM stable (133 MB après 14h) — -97% vs projection initiale
+- ✅ Ledger intact — Aucune corruption détectée
+- ✅ Patches P0/P1 appliqués — Stabilité garantie
+
+**Problèmes identifiés (P0-CORE):**
+- 🔴 **Cognitive Loop Inerte:** 721 cycles exécutés avec count: 0 → kernel tourne à vide
+- 🔴 **Root cause probable:** Les 4 engines (PatternLearning, Correlation, Forecast, ADR) retournent [] systématiquement
+- 🔴 **Observabilité manquante:** Impossible de diagnostiquer sans logs techniques
+- 🟡 **Artifacts manquants:** state.json.gz, universals.json.gz jamais générés → recalibration LLM impossible
 
 **Leçons apprises:**
-- 💡 Backend-first approach fonctionne (E3.4 → E4 ultra-rapide)
-- 💡 Pattern Learning backend existe MAIS invisible = valeur perdue
-- 💡 UI expose la valeur → E5 critique pour user experience
-- 💡 Ad-Hoc Tracker = missing link entre improvisation et formalisation
+- 💡 **Stabilité ≠ Fonctionnalité:** Kernel stable mais inerte (RAM OK, mais pas de résultats)
+- 💡 **Observabilité critique:** Impossible de diagnostiquer sans visibilité sur l'état interne
+- 💡 **Diagnostic précoce:** Détection du problème après 721 cycles → besoin de monitoring proactif
+- 💡 **Dépendances cachées:** Toutes les tâches P0-CORE dépendent de P0-CORE-00 (cognitive loop)
 
-**Prochaine phase (E5 finalisé):**
-- 🎯 Pattern Learning visible (enfin !)
-- 🎯 Auto-suggestions interactives
-- 🎯 Ad-Hoc tracking complet
-- 🎯 Release v3.6.0 "Terminal Intelligence Complete"
+**Prochaine phase (P0-CORE finalisé):**
+- 🎯 Cognitive loop réparé (engines produisent des résultats)
+- 🎯 Observabilité complète (WebView Bridge v1)
+- 🎯 Kernel ready protocol (initialisation garantie)
+- 🎯 Artifacts générés (state.json.gz, universals.json.gz)
+- 🎯 Release v3.6.0 "Production Kernel Ready"
 
 ### 📈 Metrics Evolution
 
-**Phase E3.4:** 6h45min → Backend complet (Verification + Learning)
-**Phase E4:** 1h → Tooling + Docs
-**Phase E5:** 6h (estimated) → UI exposure
+**Phase E3.4:** 6h45min → Backend complet (Verification + Learning) ✅
+**Phase E4:** 1h → Tooling + Docs ✅
+**Phase E4.1:** 3h → Memory Safety (Memory leaks corrigés) ✅
+**Phase P0-HARDENING:** 1h35min → Production Stability ✅
+**Phase P1-INTEGRITY:** 2h → Ledger Hardening ✅
+**Phase P0-CORE:** 12-14h (estimated) → Production Kernel ⏳
 
-**Total MVP:** ~14h pour vision complète 🎯
+**Total MVP:** ~26h pour vision complète + production-ready 🎯
 
 **Changements vs baseline E3.4:**
-- Phase: `E3.4 COMPLETED` → `E4 Production Readiness` (évolution naturelle ✅)
-- Goal: Dev Tab workflow → **Finalisation MVP pour production**
-- Scope: Ajout Parse clipboard + Helper scripts + Docs (aligné avec sprint ✅)
-- Timeline: +4h pour finalisation (budget acceptable)
+- Phase: `E3.4 COMPLETED` → `P0-CORE Production Kernel` (évolution naturelle ✅)
+- Goal: Dev Tab workflow → **Kernel production-ready avec diagnostic complet**
+- Scope: 7 tâches critiques (12-14h estimé) → **Défini dans Tasks.RL4** (aligné ✅)
+- Timeline: +12h pour production-ready (investissement nécessaire ✅)
 
 **Baseline vs Current:**
 ```diff
@@ -209,98 +233,21 @@ Phase E3.4 (Completed):
 + UI/UX (4 tabs, badges, Dev Tab) ✅
 + Workflow proposals → validation → patch ✅
 
-Phase E4 (Current Sprint):
-+ Parse LLM Response automatique 🔴
-+ Helper scripts Terminal 🟡
-+ Documentation complète 🟡
-+ Tests E2E 🟢
+Phase E4.1 (Completed):
++ Memory leaks corrigés (-97% RAM) ✅
++ Disposables VS Code propres ✅
++ ExecPool buffer management ✅
++ Console.log production mode ✅
++ JSONL rotation ✅
+
+Phase P0-CORE (Current Sprint):
++ Fix Cognitive Loop Inertia 🔴 (pending)
++ WebView Bridge v1 🔴 (pending)
++ Kernel Ready Protocol 🔴 (pending)
++ Kernel Artifact Engine 🟡 (pending)
++ Production Scheduler 🟡 (pending)
++ Kernel Sovereignty Mode 🟡 (pending)
 ```
 
-**Conclusion:** Aucune dérive. Sprint E4 est une finalisation logique du MVP.
+**Conclusion:** Aucune dérive. Sprint P0-CORE est une étape logique vers production-ready.
 
-### Risks
-
-- ✅ **RÉSOLU: Phase E3.4 complétée** — Commit 3055f6e sauvegardé
-  - **Status:** 8 phases complétées, extension compilée
-  - **Next:** Finalisation MVP (Phase E4)
-  
-- 🟢 **BAS: Parse clipboard pas encore implémenté**
-  - **Context:** Workflow fonctionne manuellement (edit proposals.json)
-  - **Action:** P0 Sprint E4 — Handler `parseLLMResponse` (1h)
-  - **Impact:** Friction UX, mais pas bloquant
-  
-- 🟢 **BAS: Helper scripts Terminal manquants**
-  - **Context:** User doit écrire marqueurs manuellement
-  - **Action:** P0 Sprint E4 — Scripts rl4-log.js + sh (2h)
-  - **Impact:** Friction développeur, mais workaround possible
-  
-- 🟡 **MOYEN: Documentation incomplète**
-  - **Context:** README pas à jour avec Phase E3.4
-  - **Action:** P0 Sprint E4 — Update README + Terminal docs (1h)
-  - **Impact:** Onboarding difficile pour nouveaux users
-
-## Agent Observations
-
-### 📊 État Actuel vs Plan
-
-**Phase E4 Status:** 🎯 **EN COURS** (Sprint Production Readiness)
-
-**Audit Results (2025-11-16 10:00):**
-- ✅ **Code aligné à 97%** avec vision Dev Tab
-- ✅ **Core features complètes:** Verification Engine, Pattern Learning, Mark as Done
-- ✅ **UI/UX complète:** 4 tabs, badges dynamiques, color-coding
-- ✅ **Architecture solide:** Séparation claire, types stricts, error handling
-- 🟡 **Tooling manquant:** Parse clipboard (P0), helper scripts (P0)
-- 🟡 **Docs manquantes:** README Terminal, release notes
-
-**Blockers actuels:** Aucun 🎉
-
-**Sprint E4 (4h estimé):**
-1. 🔴 Parse LLM Response (1h)
-2. 🟡 Helper scripts Terminal (2h)
-3. 🟡 Documentation (1h)
-
-### 🎯 Recommandations
-
-**Immédiat (Sprint E4 - 4h):**
-
-1. **[P0] Implémenter `parseLLMResponse`** (1h)
-   - Handler dans extension.ts
-   - Regex: `/RL4_PROPOSAL["\s:]*({[\s\S]*?})/`
-   - Bouton UI: "📋 Parse LLM Response" dans Control Tab
-   - Test: Copier JSON → Cliquer bouton → Vérifier proposals.json
-
-2. **[P0] Créer helper scripts** (2h)
-   - `scripts/rl4-log.js`: Node.js helper pour terminal-events.jsonl
-   - `scripts/rl4-log.sh`: Bash functions rl4_task_start/result
-   - Test: Source script → Run command → Vérifier JSONL
-
-3. **[P0] Mettre à jour docs** (1h)
-   - README.md: Section "Phase E3.4 Achievements"
-   - README_RL4_TERMINAL.md: Usage examples + marqueurs
-   - RELEASE_NOTES_v3.5.8.md: Changelog complet
-
-**Post-Sprint (P1):**
-4. [P1] Test E2E workflow (30min)
-5. [P1] Créer ADR-011: Terminal Patterns Learning (30min)
-6. [P1] Tag release v3.5.8 + publish (15min)
-
-### 💭 Insights
-
-**Ce qui a bien fonctionné (E3.4):**
-- ✅ Focus sur core features avant tooling
-- ✅ Tests automatisés proactifs (46 tests)
-- ✅ Documentation inline exhaustive
-- ✅ Commit réguliers pour traçabilité
-
-**Leçons apprises:**
-- 💡 MVP = Core engine + UI, tooling vient après
-- 💡 Pattern Learning apporte valeur immédiate (auto-suggest)
-- 💡 Bias Guard crucial pour éviter scope creep
-- 💡 Tests automatisés détectent regressions tôt
-
-**Prochaine phase (E4 finalisé):**
-- 🎯 Extension prête pour utilisation production
-- 🎯 Workflow Dev Tab complet end-to-end
-- 🎯 Documentation claire pour onboarding
-- 🎯 Release v3.5.8 avec changelog

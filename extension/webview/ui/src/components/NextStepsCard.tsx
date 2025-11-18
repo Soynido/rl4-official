@@ -57,10 +57,10 @@ export const NextStepsCard: React.FC<NextTasksProps> = ({ mode, steps }) => {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'P0': return '#ff4d4d';
-      case 'P1': return '#ff9500';
-      case 'P2': return '#667eea';
-      default: return '#666';
+      case 'P0': return 'var(--vscode-inputValidation-errorBorder)';
+      case 'P1': return 'var(--vscode-inputValidation-warningBorder)';
+      case 'P2': return 'var(--vscode-textLink-foreground)';
+      default: return 'var(--vscode-descriptionForeground)';
     }
   };
 

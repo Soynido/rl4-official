@@ -12,6 +12,7 @@ import { ExecPool } from './kernel/ExecPool';
 import { loadKernelConfig } from './kernel/config';
 import { GitCommitListener } from './kernel/inputs/GitCommitListener';
 import { FileChangeWatcher } from './kernel/inputs/FileChangeWatcher';
+import { LiveWatcher } from './kernel/api/hooks/LiveWatcher';
 import { AppendOnlyWriter } from './kernel/AppendOnlyWriter';
 import { KernelBootstrap } from './kernel/KernelBootstrap';
 import { CognitiveLogger } from './kernel/CognitiveLogger';
@@ -26,7 +27,9 @@ import { CommitContextCollector } from './kernel/api/CommitContextCollector';
 import { CommitPromptGenerator } from './kernel/api/CommitPromptGenerator';
 import { TerminalPatternsLearner } from './kernel/cognitive/TerminalPatternsLearner';
 import { TasksRL4Parser } from './kernel/cognitive/TasksRL4Parser';
+import { TaskVerificationEngine } from './kernel/cognitive/TaskVerificationEngine';
 import { AdHocTracker } from './kernel/cognitive/AdHocTracker';
+import { SnapshotReminder } from './kernel/api/SnapshotReminder'; // ✅ P1: Snapshot reminder system
 import { MemoryMonitor } from './kernel/MemoryMonitor'; // ✅ NEW: Memory monitoring
 import { MemoryWatchdog } from './kernel/MemoryWatchdog'; // ✅ NEW: Memory watchdog
 import * as path from 'path';
@@ -43,6 +46,7 @@ let kernel: {
     scheduler: CognitiveScheduler;
     execPool: ExecPool;
     api: KernelAPI;
+    isReady: boolean;
 } | null = null;
 
 // WebView Panel
@@ -50,6 +54,128 @@ let webviewPanel: vscode.WebviewPanel | null = null;
 
 // Status Bar Item
 let statusBarItem: vscode.StatusBarItem | null = null;
+
+// ✅ P1: Snapshot Reminder
+let snapshotReminder: SnapshotReminder | null = null;
+
+// Ingestion lock (prevents cycle from overwriting imported data)
+let ingestionLock: boolean = false;
+
+// Export ingestion lock getter for CognitiveScheduler
+export function isIngestionLocked(): boolean {
+    return ingestionLock;
+}
+
+// ✅ P0-CORE-00: Throttle for requestStatus to prevent DOS
+let lastStatusRequestTs: number = 0;
+const STATUS_REQUEST_THROTTLE_MS = 500; // Max 1 request per 500ms
+
+/**
+ * ✅ P0-CORE-AUTO-BOOTSTRAP: Ensure workspace has minimal RL4 structure
+ * Creates .reasoning_rl4 directories and files if missing
+ */
+async function ensureWorkspaceBootstrap(workspaceRoot: string, logger: CognitiveLogger) {
+    const baseDir = path.join(workspaceRoot, '.reasoning_rl4');
+    const dirs = [
+        baseDir,
+        path.join(baseDir, 'ledger'),
+        path.join(baseDir, 'traces'),
+        path.join(baseDir, 'cache'),
+        path.join(baseDir, 'artifacts')
+    ];
+
+    // Create folders if missing
+    for (const dir of dirs) {
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+            logger.system(`[BOOTSTRAP] Created directory: ${dir}`);
+        }
+    }
+
+    // Create minimal ledger.jsonl if missing
+    const ledgerPath = path.join(baseDir, 'ledger', 'ledger.jsonl');
+    if (!fs.existsSync(ledgerPath)) {
+        const bootstrapEvent = {
+            type: "bootstrap",
+            timestamp: Date.now(),
+            message: "Workspace initialized by RL4 extension"
+        };
+        fs.writeFileSync(ledgerPath, JSON.stringify(bootstrapEvent) + "\n");
+        logger.system(`[BOOTSTRAP] Created minimal ledger.jsonl`);
+    }
+
+    // Create minimal artifacts if missing
+    const artifactsPath = path.join(baseDir, 'artifacts', 'kernel.json');
+    if (!fs.existsSync(artifactsPath)) {
+        const emptyArtifacts = {
+            patterns: [],
+            correlations: [],
+            forecasts: [],
+            cognitiveHistory: [],
+            cycleCount: 0
+        };
+        fs.writeFileSync(artifactsPath, JSON.stringify(emptyArtifacts, null, 2));
+        logger.system(`[BOOTSTRAP] Created empty kernel artifacts`);
+    }
+
+    logger.system(`[BOOTSTRAP] Workspace ${workspaceRoot} is ready`);
+}
+
+/**
+ * ✅ P0-CORE-03: READY LOCK - Check if kernel is ready and send not-ready message if not
+ * @param messageType - Type of message being handled (for logging)
+ * @returns true if kernel is ready, false otherwise
+ */
+function checkKernelReady(messageType: string): boolean {
+    if (!kernel) {
+        if (webviewPanel) {
+            webviewPanel.webview.postMessage({
+                type: 'kernel:notReady',
+                reason: 'kernel_not_initialized',
+                message: 'Kernel not initialized. Please wait for activation.'
+            });
+        }
+        if (logger) {
+            logger.warning(`[READY LOCK] Blocked ${messageType}: kernel not initialized`);
+        }
+        return false;
+    }
+    
+    if (!kernel.isReady) {
+        const reason = kernel.scheduler.getNotReadyReason() || 'kernel_not_ready';
+        if (webviewPanel) {
+            webviewPanel.webview.postMessage({
+                type: 'kernel:notReady',
+                reason,
+                message: `Kernel not ready: ${reason}`
+            });
+        }
+        if (logger) {
+            logger.warning(`[READY LOCK] Blocked ${messageType}: ${reason}`);
+        }
+        return false;
+    }
+    
+    // Check SAFE MODE
+    const ledgerStatus = kernel.scheduler.getLedgerStatus();
+    if (ledgerStatus.safeMode) {
+        const reason = ledgerStatus.corruptionReason || 'ledger_safe_mode';
+        if (webviewPanel) {
+            webviewPanel.webview.postMessage({
+                type: 'kernel:notReady',
+                reason: 'safe_mode',
+                message: `Kernel in SAFE MODE: ${reason}`,
+                safeMode: true
+            });
+        }
+        if (logger) {
+            logger.warning(`[READY LOCK] Blocked ${messageType}: SAFE MODE - ${reason}`);
+        }
+        return false;
+    }
+    
+    return true;
+}
 
 export async function activate(context: vscode.ExtensionContext) {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -128,6 +254,10 @@ export async function activate(context: vscode.ExtensionContext) {
         const forecastMetrics = bootstrap.metrics;
         
         const scheduler = new CognitiveScheduler(workspaceRoot, timerRegistry, logger, forecastMetrics);
+        
+        // Set ingestion lock checker to prevent cycle from overwriting imported data
+        scheduler.setIngestionLockChecker(() => ingestionLock);
+        
         const execPool = new ExecPool(2, 2000, workspaceRoot);
         const api = new KernelAPI(
             timerRegistry,
@@ -144,10 +274,14 @@ export async function activate(context: vscode.ExtensionContext) {
             healthMonitor,
             scheduler,
             execPool,
-            api
+            api,
+            isReady: false // Will be set to true after scheduler.start() completes
         };
         
         logger.system('✅ RL4 Kernel components created', '✅');
+        
+        // ✅ P0-CORE-AUTO-BOOTSTRAP: Ensure workspace structure exists
+        await ensureWorkspaceBootstrap(workspaceRoot, logger);
         
         // Bootstrap already loaded above (before scheduler creation)
         if (bootstrap.initialized) {
@@ -187,6 +321,20 @@ export async function activate(context: vscode.ExtensionContext) {
             channel.appendLine(`[${new Date().toISOString().substring(11, 23)}] ✅ Scheduler started successfully`);
             channel.appendLine(`[${new Date().toISOString().substring(11, 23)}] 🛡️ Watchdog active (${kernelConfig.cognitive_cycle_interval_ms}ms cycles)`);
             
+            // Set kernel readiness flag
+            if (kernel && logger) {
+                kernel.isReady = true;
+                logger.system('✅ Kernel ready', '✅');
+            }
+            
+            // ✅ P1: Initialize Snapshot Reminder (after kernel is ready)
+            snapshotReminder = new SnapshotReminder(workspaceRoot, logger || undefined);
+            snapshotReminder.start();
+            context.subscriptions.push({ 
+                dispose: () => snapshotReminder?.stop() 
+            });
+            channel.appendLine(`[${new Date().toISOString().substring(11, 23)}] ⏰ Snapshot reminder initialized`);
+            
             // Start Input Layer: GitCommitListener + FileChangeWatcher
             channel.appendLine(`[${new Date().toISOString().substring(11, 23)}] 📥 Starting Input Layer...`);
             
@@ -212,6 +360,50 @@ export async function activate(context: vscode.ExtensionContext) {
             const fileWatcher = new FileChangeWatcher(workspaceRoot, fileTracesWriter, logger || undefined);
             await fileWatcher.startWatching();
             channel.appendLine(`[${new Date().toISOString().substring(11, 23)}] ✅ FileChangeWatcher active`);
+            
+            // 3. LiveWatcher (detects .RL4 file changes and triggers cognitive cycles)
+            // ✅ P0-DZ-009: Initialize TaskVerificationEngine for task reloading
+            const taskVerificationEngine = new TaskVerificationEngine(workspaceRoot);
+            await taskVerificationEngine.initialize();
+            logger?.system('✅ TaskVerificationEngine initialized', '✅');
+            
+            const liveWatcher = new LiveWatcher(workspaceRoot);
+            liveWatcher.onRL4FileChange(async (file) => {
+                const fileName = path.basename(file);
+                const fileType = fileName.replace('.RL4', '') as 'Plan' | 'Tasks' | 'Context';
+                
+                // ✅ P0-DZ-009: Reload TaskVerificationEngine when Tasks.RL4 changes
+                if (fileName === 'Tasks.RL4') {
+                    try {
+                        await taskVerificationEngine.reloadTasks();
+                        logger?.system(`✅ TaskVerificationEngine reloaded after Tasks.RL4 modification`, '✅');
+                    } catch (error) {
+                        logger?.warning(`⚠️ Failed to reload TaskVerificationEngine: ${error}`);
+                    }
+                }
+                
+                // Log RL4 file update
+                logger?.logRL4FileUpdate(fileType, {
+                    file: fileType,
+                    updated_by: 'LLM Agent (Cursor AI)',
+                    changes: 'File modified externally',
+                    version_old: '1.0.0',
+                    version_new: '1.0.1',
+                    timestamp: new Date().toISOString()
+                });
+                
+                logger?.system(`📥 ${fileName} modified externally, triggering cycle...`, '📥');
+                
+                // ✅ P0-DZ-012: Await cycle to prevent parallel execution
+                try {
+                    await scheduler.runCycle('rl4_file_change');
+                    logger?.system(`✅ Cycle completed after ${fileName} modification`, '✅');
+                } catch (error) {
+                    logger?.error(`❌ Cycle failed after ${fileName} modification: ${error}`);
+                }
+            });
+            liveWatcher.start();
+            channel.appendLine(`[${new Date().toISOString().substring(11, 23)}] ✅ LiveWatcher active (monitoring .RL4 files)`);
         }, 3000);
         
         // Register minimal commands
@@ -291,14 +483,13 @@ export async function activate(context: vscode.ExtensionContext) {
                 try {
                     logger!.system(`📋 Generating snapshot (mode: ${choice.mode})...`, '📋');
                     
-                    // Generate adaptive prompt with selected mode (Phase 5: Pass CognitiveLogger)
-                    const promptBuilder = new AdaptivePromptBuilder(workspaceRoot, logger || undefined);
-                    const snapshot = await promptBuilder.buildPrompt({
-                        mode: choice.mode as any,
-                        includeHistory: choice.mode === 'exploratory' || choice.mode === 'free' || choice.mode === 'firstUse',
-                        includeGoals: true,
-                        includeTechStack: true
-                    });
+                    // ✅ P3: Use UnifiedPromptBuilder instead of AdaptivePromptBuilder
+                    const promptBuilder = new UnifiedPromptBuilder(
+                        path.join(workspaceRoot, '.reasoning_rl4'),
+                        logger || undefined
+                    );
+                    const result = await promptBuilder.generate(choice.mode as any);
+                    const snapshot = result.prompt;
                     
                     // Show in new document
                     const doc = await vscode.workspace.openTextDocument({
@@ -306,6 +497,11 @@ export async function activate(context: vscode.ExtensionContext) {
                         language: 'markdown'
                     });
                     await vscode.window.showTextDocument(doc);
+                    
+                    // ✅ P1: Record that snapshot was generated
+                    if (snapshotReminder) {
+                        snapshotReminder.recordSnapshotGenerated();
+                    }
                     
                     vscode.window.showInformationMessage(`✅ Snapshot generated (${choice.label})! Copy-paste it into your AI agent.`);
                     logger!.system('✅ Snapshot generated successfully', '✅');
@@ -528,7 +724,9 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
         await promptBuilder.initializeDefaults();
         
         // Initialize Cursor rules for RL4 strict mode enforcement
-        ensureCursorRuleExists(workspaceRoot, logger);
+        // DISABLED: This rule was causing infinite loops by triggering LLM reads on .RL4 file changes
+        // The new RL4_STABLE_MODE.mdc rule (manual) prevents this behavior
+        // ensureCursorRuleExists(workspaceRoot, logger);
 
         // Add command to open RL4 Terminal
         context.subscriptions.push(
@@ -573,7 +771,12 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                 
                 switch (message.type) {
                     case 'generateSnapshot':
+                        // ✅ P0-CORE-03: READY LOCK (snapshot peut être généré sans kernel, mais on bloque quand même pour cohérence)
+                        if (!checkKernelReady('generateSnapshot')) {
+                            break;
+                        }
                         try {
+                            
                             const deviationMode = message.deviationMode || 'flexible';
                             logger!.system(`📋 Generating snapshot (mode: ${deviationMode})...`, '📋');
                             const snapshot = await promptBuilder.generate(deviationMode);
@@ -582,6 +785,11 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                                 type: 'snapshotGenerated',
                                 payload: snapshot
                             });
+                            
+                            // ✅ P1: Record that snapshot was generated
+                            if (snapshotReminder) {
+                                snapshotReminder.recordSnapshotGenerated();
+                            }
                             
                             logger!.system(`✅ Snapshot generated (${snapshot.length} chars)`, '✅');
                         } catch (error) {
@@ -594,8 +802,81 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                         break;
                     
 
-                    case 'requestPatterns':
+                    case 'requestStatus':
+                        // ✅ P0-CORE-00: Throttle to prevent DOS from infinite polling
+                        const now = Date.now();
+                        if (now - lastStatusRequestTs < STATUS_REQUEST_THROTTLE_MS) {
+                            // Throttled: ignore this request
+                            break;
+                        }
+                        lastStatusRequestTs = now;
+                        
                         try {
+                            if (!kernel) {
+                                webviewPanel!.webview.postMessage({
+                                    type: 'kernelStatus',
+                                    payload: {
+                                        ready: false,
+                                        message: 'Kernel not initialized'
+                                    }
+                                });
+                                break;
+                            }
+                            
+                            if (!kernel.isReady) {
+                                webviewPanel!.webview.postMessage({
+                                    type: 'kernelStatus',
+                                    payload: {
+                                        ready: false,
+                                        message: 'Kernel initializing...',
+                                        initializing: true
+                                    }
+                                });
+                                break;
+                            }
+                            
+                            // Get kernel status
+                            const status = kernel.api.status();
+                            const ledgerStatus = kernel.scheduler.getLedgerStatus();
+                            const cycleCount = kernel.scheduler.getCycleCount();
+                            const cycleHealth = kernel.api.getLastCycleHealth();
+                            
+                            logger!.system(`📊 Kernel status requested (cycle: ${cycleCount}, safeMode: ${ledgerStatus.safeMode})`, '📊');
+                            
+                            webviewPanel!.webview.postMessage({
+                                type: 'kernelStatus',
+                                payload: {
+                                    ready: true,
+                                    status: {
+                                        ...status,
+                                        cycleCount,
+                                        safeMode: ledgerStatus.safeMode,
+                                        corruptionReason: ledgerStatus.corruptionReason,
+                                        cycleHealth
+                                    }
+                                }
+                            });
+                        } catch (error) {
+                            const msg = `Failed to get kernel status: ${error instanceof Error ? error.message : 'Unknown error'}`;
+                            logger!.error(msg);
+                            webviewPanel!.webview.postMessage({
+                                type: 'kernelStatus',
+                                payload: {
+                                    ready: false,
+                                    message: msg,
+                                    error: true
+                                }
+                            });
+                        }
+                        break;
+
+                    case 'requestPatterns':
+                        // ✅ P0-CORE-03: READY LOCK
+                        if (!checkKernelReady('requestPatterns')) {
+                            break;
+                        }
+                        try {
+                            
                             logger!.system('📊 Loading terminal patterns...', '📊');
                             
                             // Load patterns from TerminalPatternsLearner
@@ -629,7 +910,12 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                         break;
 
                     case 'requestSuggestions':
+                        // ✅ P0-CORE-03: READY LOCK
+                        if (!checkKernelReady('requestSuggestions')) {
+                            break;
+                        }
                         try {
+                            
                             logger!.system('💡 Generating task suggestions...', '💡');
                             
                             // Read Tasks.RL4
@@ -678,7 +964,12 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                         break;
 
                     case 'applySuggestion':
+                        // ✅ P0-CORE-03: READY LOCK
+                        if (!checkKernelReady('applySuggestion')) {
+                            break;
+                        }
                         try {
+                            
                             const { taskId, suggestedCondition } = message.payload;
                             logger!.system(`✏️ Applying suggestion for task ${taskId}...`, '✏️');
                             
@@ -746,7 +1037,12 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                         break;
 
                     case 'requestAdHocActions':
+                        // ✅ P0-CORE-03: READY LOCK
+                        if (!checkKernelReady('requestAdHocActions')) {
+                            break;
+                        }
                         try {
+                            
                             logger!.system('🔍 Loading ad-hoc actions...', '🔍');
                             
                             // Detect ad-hoc actions (last 2 hours)
@@ -793,7 +1089,13 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                         break;
                     
                     case 'importLLMResponse':
+                        // ✅ P0-CORE-03: READY LOCK
+                        if (!checkKernelReady('importLLMResponse')) {
+                            break;
+                        }
                         try {
+                            // Set ingestion lock to prevent cycle from overwriting
+                            ingestionLock = true;
                             logger!.system('📥 Importing LLM response from clipboard...', '📥');
                             
                             // Read clipboard
@@ -913,6 +1215,9 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                             );
                             
                             logger!.system(`✅ LLM response imported successfully`, '✅');
+                            
+                            // Clear ingestion lock after successful import
+                            ingestionLock = false;
                         } catch (error) {
                             logger!.error(`Failed to import LLM response: ${error}`);
                             webviewPanel!.webview.postMessage({
@@ -920,6 +1225,189 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                                 payload: { message: `Import failed: ${error}` }
                             });
                             vscode.window.showErrorMessage(`RL4: Failed to import LLM response: ${error}`);
+                            
+                            // Clear lock on error
+                            ingestionLock = false;
+                        }
+                        break;
+                    
+                    case 'submitDecisions':
+                        // ✅ P0-CORE-03: READY LOCK
+                        if (!checkKernelReady('submitDecisions')) {
+                            break;
+                        }
+                        try {
+                            
+                            logger!.system('📋 Processing user decisions...', '📋');
+                            const decisions = message.decisions || [];
+                            
+                            if (!Array.isArray(decisions) || decisions.length === 0) {
+                                webviewPanel!.webview.postMessage({
+                                    type: 'error',
+                                    payload: 'No decisions provided'
+                                });
+                                break;
+                            }
+                            
+                            const rl4Path = path.join(workspaceRoot, '.reasoning_rl4');
+                            const adrsDir = path.join(rl4Path, 'adrs', 'auto');
+                            
+                            // Ensure directory exists
+                            if (!fs.existsSync(adrsDir)) {
+                                fs.mkdirSync(adrsDir, { recursive: true });
+                            }
+                            
+                            let accepted = 0;
+                            let rejected = 0;
+                            let backlogged = 0;
+                            
+                            for (const decision of decisions) {
+                                const { id, action, priority } = decision;
+                                
+                                // Find the proposal file
+                                const proposalFiles = fs.readdirSync(adrsDir).filter(f => f.startsWith('adr-') && f.endsWith('.json'));
+                                let proposalFile: string | null = null;
+                                
+                                for (const file of proposalFiles) {
+                                    try {
+                                        const proposal = JSON.parse(fs.readFileSync(path.join(adrsDir, file), 'utf-8'));
+                                        if (proposal.id === id || file.includes(id)) {
+                                            proposalFile = file;
+                                            break;
+                                        }
+                                    } catch (e) {
+                                        // Skip invalid files
+                                    }
+                                }
+                                
+                                if (!proposalFile) {
+                                    logger!.warning(`Proposal ${id} not found`);
+                                    continue;
+                                }
+                                
+                                const proposalPath = path.join(adrsDir, proposalFile);
+                                const proposal = JSON.parse(fs.readFileSync(proposalPath, 'utf-8'));
+                                
+                                if (action === 'accept') {
+                                    // Update proposal status
+                                    proposal.status = 'accepted';
+                                    proposal.priority = priority || 'P1';
+                                    proposal.validatedAt = new Date().toISOString();
+                                    fs.writeFileSync(proposalPath, JSON.stringify(proposal, null, 2));
+                                    accepted++;
+                                    logger!.system(`✅ Accepted proposal ${id} as ${priority}`, '✅');
+                                } else if (action === 'reject') {
+                                    // Update proposal status
+                                    proposal.status = 'rejected';
+                                    proposal.validatedAt = new Date().toISOString();
+                                    fs.writeFileSync(proposalPath, JSON.stringify(proposal, null, 2));
+                                    rejected++;
+                                    logger!.system(`🗑️ Rejected proposal ${id}`, '🗑️');
+                                } else if (action === 'backlog') {
+                                    // Update proposal status
+                                    proposal.status = 'backlog';
+                                    proposal.priority = priority || 'P2';
+                                    proposal.validatedAt = new Date().toISOString();
+                                    fs.writeFileSync(proposalPath, JSON.stringify(proposal, null, 2));
+                                    backlogged++;
+                                    logger!.system(`📦 Backlogged proposal ${id} as ${priority}`, '📦');
+                                }
+                            }
+                            
+                            // Send confirmation to WebView
+                            webviewPanel!.webview.postMessage({
+                                type: 'decisionsProcessed',
+                                payload: {
+                                    accepted,
+                                    rejected,
+                                    backlogged,
+                                    total: decisions.length
+                                }
+                            });
+                            
+                            vscode.window.showInformationMessage(
+                                `RL4: Processed ${decisions.length} decision(s): ${accepted} accepted, ${rejected} rejected, ${backlogged} backlogged`
+                            );
+                            
+                            logger!.system(`✅ Processed ${decisions.length} decision(s)`, '✅');
+                        } catch (error) {
+                            logger!.error(`Failed to process decisions: ${error}`);
+                            webviewPanel!.webview.postMessage({
+                                type: 'error',
+                                payload: `Failed to process decisions: ${error}`
+                            });
+                            vscode.window.showErrorMessage(`RL4: Failed to process decisions: ${error}`);
+                        }
+                        break;
+                    
+                    case 'applyPatch':
+                        // ✅ P0-CORE-03: READY LOCK
+                        if (!checkKernelReady('applyPatch')) {
+                            break;
+                        }
+                        try {
+                            
+                            logger!.system('🔧 Applying patch...', '🔧');
+                            const patch = message.patch;
+                            
+                            if (!patch || typeof patch !== 'object') {
+                                webviewPanel!.webview.postMessage({
+                                    type: 'error',
+                                    payload: 'Invalid patch format'
+                                });
+                                break;
+                            }
+                            
+                            // Handle RL4_TASKS_PATCH format
+                            if (patch.RL4_TASKS_PATCH) {
+                                const tasksPatch = patch.RL4_TASKS_PATCH;
+                                const tasksPath = path.join(workspaceRoot, '.reasoning_rl4', 'Tasks.RL4');
+                                
+                                if (fs.existsSync(tasksPath)) {
+                                    let tasksContent = fs.readFileSync(tasksPath, 'utf-8');
+                                
+                                    // Apply changes from patch
+                                    if (tasksPatch.changes && Array.isArray(tasksPatch.changes)) {
+                                        for (const change of tasksPatch.changes) {
+                                            if (change.op === 'add') {
+                                                // Add task to Active section
+                                                const taskLine = `- [ ] [${change.priority || 'P1'}] ${change.title} @rl4:id=${change.origin || 'rl4'}-${Date.now()}`;
+                                                
+                                                // Find Active section and append
+                                                const activeMatch = tasksContent.match(/(## Active[^\n]*\n)/);
+                                                if (activeMatch) {
+                                                    tasksContent = tasksContent.replace(
+                                                        activeMatch[0],
+                                                        `${activeMatch[0]}${taskLine}\n`
+                                                    );
+                                                } else {
+                                                    // No Active section, create it
+                                                    tasksContent += `\n## Active\n\n${taskLine}\n`;
+                                                }
+                                            }
+                                        }
+                                        
+                                        fs.writeFileSync(tasksPath, tasksContent);
+                                        logger!.system(`✅ Applied ${tasksPatch.changes.length} change(s) to Tasks.RL4`, '✅');
+                                    }
+                                }
+                            }
+                            
+                            // Send confirmation to WebView
+                            webviewPanel!.webview.postMessage({
+                                type: 'patchApplied',
+                                payload: { success: true }
+                            });
+                            
+                            vscode.window.showInformationMessage('RL4: Patch applied successfully');
+                            logger!.system('✅ Patch applied successfully', '✅');
+                        } catch (error) {
+                            logger!.error(`Failed to apply patch: ${error}`);
+                            webviewPanel!.webview.postMessage({
+                                type: 'error',
+                                payload: `Failed to apply patch: ${error}`
+                            });
+                            vscode.window.showErrorMessage(`RL4: Failed to apply patch: ${error}`);
                         }
                         break;
                     
@@ -982,6 +1470,10 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                         break;
                     
                     case 'generateCommitPrompt':
+                        // ✅ P0-CORE-03: READY LOCK
+                        if (!checkKernelReady('generateCommitPrompt')) {
+                            break;
+                        }
                         try {
                             logger!.system('📝 Collecting commit context...', '📝');
                             
@@ -1420,6 +1912,11 @@ _This file is managed by RL4. Add ADRs here as they are proposed by the agent._
                                             payload: snapshot
                                         });
                                         
+                                        // ✅ P1: Record that snapshot was generated
+                                        if (snapshotReminder) {
+                                            snapshotReminder.recordSnapshotGenerated();
+                                        }
+                                        
                                         logger!.system(`✅ Snapshot generated (${snapshot.length} chars)`, '✅');
                                     } catch (error) {
                                         logger!.error(`Failed to generate snapshot: ${error}`);
@@ -1670,14 +2167,31 @@ function getWebviewHtml(context: vscode.ExtensionContext, panel: vscode.WebviewP
     
     // Resolve webview-safe URIs for Vite assets
     const distPath = vscode.Uri.joinPath(context.extensionUri, 'extension', 'webview', 'ui', 'dist', 'assets');
-    const scriptUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(distPath, scriptMatch[1]));
-    const styleUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(distPath, styleMatch[1]));
+    const scriptPath = vscode.Uri.joinPath(distPath, scriptMatch[1]);
+    const stylePath = vscode.Uri.joinPath(distPath, styleMatch[1]);
+    
+    // Add cache-busting query parameter to force reload (extract hash from filename)
+    const scriptHash = scriptMatch[1].match(/index-([^.]+)\.js/)?.[1] || Date.now().toString();
+    const styleHash = styleMatch[1].match(/index-([^.]+)\.css/)?.[1] || Date.now().toString();
+    
+    const scriptUriBase = panel.webview.asWebviewUri(scriptPath);
+    const styleUriBase = panel.webview.asWebviewUri(stylePath);
+    
+    // Append cache-busting query parameter
+    const scriptUri = scriptUriBase.toString() + `?v=${scriptHash}`;
+    const styleUri = styleUriBase.toString() + `?v=${styleHash}`;
+    
+    // Generate unique build ID to force cache invalidation
+    const buildId = scriptHash + '-' + Date.now();
     
     return /* html */ `
         <!doctype html>
         <html>
             <head>
                 <meta charset="utf-8" />
+                <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+                <meta http-equiv="Pragma" content="no-cache" />
+                <meta http-equiv="Expires" content="0" />
                 <meta
                     http-equiv="Content-Security-Policy"
                     content="default-src 'none'; img-src ${panel.webview.cspSource} blob: data:;
@@ -1685,8 +2199,9 @@ function getWebviewHtml(context: vscode.ExtensionContext, panel: vscode.WebviewP
                              font-src ${panel.webview.cspSource}; connect-src ${panel.webview.cspSource};"
                 />
                 <meta name="viewport" content="width=device-width,initial-scale=1" />
+                <meta name="rl4-build-id" content="${buildId}" />
                 <link rel="stylesheet" href="${styleUri}">
-                <title>RL4 Dashboard</title>
+                <title>RL4 Dashboard v3.5.11</title>
             </head>
             <body>
                 <div id="root"></div>
@@ -1697,18 +2212,19 @@ function getWebviewHtml(context: vscode.ExtensionContext, panel: vscode.WebviewP
                         if (typeof acquireVsCodeApi === 'function') {
                             try {
                                 window.vscode = acquireVsCodeApi();
-                                console.log('[RL4 WebView] VS Code API acquired in inline script');
                             } catch (e) {
-                                console.warn('[RL4 WebView] Could not acquire API (may already be acquired):', e.message);
-                                // API already acquired somewhere else - try to find it
-                                if (!window.vscode) {
-                                    console.error('[RL4 WebView] CRITICAL: API acquired elsewhere but not available in window.vscode');
+                                // API already acquired - this is normal in some scenarios
                                 }
-                            }
-                        } else {
-                            console.error('[RL4 WebView] acquireVsCodeApi function not found');
                         }
                     })();
+                </script>
+                <script>
+                    // Unregister service workers to prevent stale cache
+                    if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.getRegistrations().then(registrations => {
+                            registrations.forEach(registration => registration.unregister());
+                        });
+                    }
                 </script>
                 <script type="module" src="${scriptUri}"></script>
             </body>
@@ -1942,5 +2458,5 @@ export async function deactivate() {
     
     logger?.system('🧠 RL4 Kernel deactivated cleanly', '🧠');
 }
-// test flush fix
-// test flush fix
+
+// Functions exported with ES6 export syntax above

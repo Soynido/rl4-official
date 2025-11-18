@@ -51,6 +51,20 @@ export class KernelAPI {
     }
     
     /**
+     * ✅ P0-CORE-03: Get last cycle health (for kernel status API)
+     * @returns Last cycle health information
+     */
+    getLastCycleHealth(): {
+        cycleId: number;
+        success: boolean;
+        phases: any[];
+        duration: number;
+        error: string | null;
+    } {
+        return this.scheduler.getLastCycleHealth();
+    }
+    
+    /**
      * Run cognitive reflection (manual cycle trigger)
      */
     async reflect(): Promise<CycleResult> {

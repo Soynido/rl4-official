@@ -30,6 +30,7 @@ import { PatternEvolutionTracker } from './cognitive/PatternEvolutionTracker';
 import { SnapshotRotation } from './indexer/SnapshotRotation';
 import { AppendOnlyWriter } from './AppendOnlyWriter';
 import { CognitiveLogger, HourlySummary } from './CognitiveLogger';
+import { PlanTasksContextParser, PlanData, TasksData, ContextData, KPIRecordKernel } from './api/PlanTasksContextParser';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -61,6 +62,8 @@ export class CognitiveScheduler {
     private cycleCount: number = 0;
     private isRunning: boolean = false;
     private lastInputHash: string = '';
+    private cycleQueue: Array<'timer' | 'rl4_file_change'> = [];
+    private processingQueue: boolean = false;
     private ledger: RBOMLedger;
     private lastCycleTime: number = Date.now();
     private watchdogTimer: NodeJS.Timeout | null = null;
@@ -117,6 +120,8 @@ export class CognitiveScheduler {
     private patternEvolutionTracker: PatternEvolutionTracker;
     // Phase E2.7: Snapshot rotation (History Enrichment)
     private snapshotRotation: SnapshotRotation;
+    // P0: Plan/Tasks/Context parser for .RL4 file reloading
+    private planTasksContextParser: PlanTasksContextParser;
     
     constructor(
         workspaceRoot: string,
@@ -150,6 +155,10 @@ export class CognitiveScheduler {
         this.patternEvolutionTracker = new PatternEvolutionTracker(workspaceRoot);
         // Initialize snapshot rotation (Phase E2.7 History Enrichment)
         this.snapshotRotation = new SnapshotRotation(workspaceRoot);
+        
+        // ✅ P0-DZ-001: Initialize PlanTasksContextParser for .RL4 file reloading
+        const rl4Path = path.join(workspaceRoot, '.reasoning_rl4');
+        this.planTasksContextParser = new PlanTasksContextParser(rl4Path);
         
         // Expose to globalThis for VS Code commands
         setGlobalLedger(this.ledger);
@@ -231,6 +240,9 @@ export class CognitiveScheduler {
      */
     async start(periodMs: number = 10000): Promise<void> {
         this.intervalMs = periodMs;
+        
+        // ✅ P0-CORE-03: Set pending init reason
+        this.setPendingInitReason('scheduler_starting');
         
         // Stop any existing timers first
         this.stop();
@@ -361,6 +373,10 @@ export class CognitiveScheduler {
         }, 3600000); // 1 hour
         this.logger.system('✅ Hourly summary timer registered successfully', '✅');
         this.lastHourlySummaryTime = Date.now();
+        
+        // ✅ P0-CORE-03: Clear pending init reason - scheduler is now ready
+        this.setPendingInitReason(null);
+        this.logger.system('✅ CognitiveScheduler fully initialized and ready', '✅');
     }
     
     /**
@@ -498,11 +514,13 @@ export class CognitiveScheduler {
     /**
      * Run a complete cognitive cycle
      */
-    async runCycle(): Promise<CycleResult> {
-        this.logger.system("🔥 [runCycle] Entered runCycle()", "🔥");
+    async runCycle(trigger?: 'timer' | 'rl4_file_change'): Promise<CycleResult> {
+        this.logger.system(`🔥 [runCycle] Entered runCycle()${trigger ? ` (trigger: ${trigger})` : ''}`, "🔥");
         
         if (this.isRunning) {
-            this.logger.system("🔥 [runCycle] SKIPPED — isRunning=true", "🔥");
+            this.logger.system("🔥 [runCycle] QUEUED — isRunning=true", "🔥");
+            // ✅ P0-DZ-013: Queue le trigger, pas la fonction (évite récursion)
+            this.cycleQueue.push(trigger || 'timer');
             return this.createSkippedResult();
         }
         
@@ -513,6 +531,14 @@ export class CognitiveScheduler {
         try {
             this.cycleCount++;
             this.logger.cycleStart(this.cycleCount);
+            
+            // ✅ P0-DZ-001/DZ-002: Reload fresh .RL4 data at cycle start
+            this.logger.system('📥 Reloading Plan/Tasks/Context.RL4...', '📥');
+            const plan = this.planTasksContextParser.parsePlan();
+            const tasks = this.planTasksContextParser.parseTasks();
+            const context = this.planTasksContextParser.parseContext();
+            this.logger.system(`✅ Reloaded: Plan=${plan?.phase || 'N/A'}, Tasks=${tasks?.active.length || 0} active, Context=${context?.confidence || 'N/A'} confidence`, '✅');
+            
             this.logger.system('🔥 [DEBUG] After cycleStart(), before calculating input hash...', '🔥');
             
             const startTime = Date.now();
@@ -601,10 +627,28 @@ export class CognitiveScheduler {
                 
             } catch (error) {
                 result.success = false;
-                this.logger.error(`Cycle failed: ${error}`);
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                this.logger.error(`Cycle failed: ${errorMsg}`);
+                result.phases.push({
+                    name: 'error',
+                    duration: Date.now() - startTime,
+                    success: false,
+                    error: errorMsg
+                });
+                // ✅ P0-CORE-03: Store cycle error
+                this.lastCycleError = errorMsg;
             } finally {
                 result.completedAt = new Date().toISOString();
                 result.duration = Date.now() - startTime;
+                
+                // ✅ P0-CORE-03: Update cycle health metrics
+                this.lastCycleId = result.cycleId;
+                this.lastCycleSuccess = result.success;
+                this.lastCycleDuration = result.duration;
+                this.lastCyclePhases = [...result.phases];
+                if (result.success) {
+                    this.lastCycleError = null; // Clear error on success
+                }
                 
                 // Update watchdog timestamp (successful or not, we ran)
                 this.lastCycleTime = Date.now();
@@ -630,6 +674,44 @@ export class CognitiveScheduler {
             
             this.logger.cycleEnd(this.cycleCount, phases, health);
             
+            // ✅ P0-KPI-SEPARATION-02: Write Kernel KPIs back to Context.RL4 after successful cycle
+            if (result.success) {
+                try {
+                    const currentContext = this.planTasksContextParser.parseContext();
+                    if (currentContext) {
+                        // Calculate Kernel KPIs from cycle results (mechanical metrics only)
+                        const cognitiveLoad = this.calculateCognitiveLoad(phases, currentContext);
+                        const planDrift = this.calculatePlanDrift(currentContext);
+                        
+                        // Create Kernel KPI record (mechanical metrics)
+                        const newKPIKernel: KPIRecordKernel = {
+                            cycle: result.cycleId,
+                            cognitive_load: cognitiveLoad, // Calculated from phases (mechanical)
+                            drift: planDrift, // Calculated from plan alignment (mechanical)
+                            patterns_detected: phases.patterns || 0,
+                            tasks_active: currentContext.tasks?.active?.length || 0,
+                            queue_length: this.cycleQueue.length,
+                            scheduler_state: this.isRunning ? 'running' : (this.cycleQueue.length > 0 ? 'queued' : 'idle'),
+                            updated: new Date().toISOString()
+                        };
+                        
+                        // Update Context.RL4 with new Kernel KPI (keep last 10)
+                        // ✅ CRITICAL: Preserve kpis_llm untouched (LLM writes there, kernel never touches it)
+                        const updatedContext: ContextData = {
+                            ...currentContext,
+                            updated: new Date().toISOString(),
+                            kpis_kernel: [...(currentContext.kpis_kernel || []), newKPIKernel].slice(-10),
+                            kpis_llm: currentContext.kpis_llm || [] // ✅ PRESERVED: Kernel never modifies LLM KPIs
+                        };
+                        
+                        this.planTasksContextParser.saveContext(updatedContext);
+                        this.logger.system(`✅ Kernel KPIs written to Context.RL4 (Cycle ${result.cycleId})`, '✅');
+                    }
+                } catch (kpiError) {
+                    this.logger.warning(`⚠️ Failed to write Kernel KPIs to Context.RL4: ${kpiError}`);
+                }
+            }
+            
             // Phase E2.2: Real feedback loop every 100 cycles
             if (result.cycleId % 100 === 0) {
                 await this.applyFeedbackLoop(result.cycleId);
@@ -651,6 +733,9 @@ export class CognitiveScheduler {
         } finally {
             // ✅ P0-HARDENING-01: Guaranteed reset even if unhandled error occurs
             this.isRunning = false;
+            
+            // ✅ P0-DZ-013: Process queued cycles after current cycle completes
+            this.processQueue();
         }
     }
     
@@ -686,10 +771,20 @@ export class CognitiveScheduler {
      * Calculate input hash (for idempotence)
      */
     private async calculateInputHash(): Promise<string> {
-        // Placeholder: hash of recent events, patterns, etc.
+        // ✅ P0-DZ-001: Include .RL4 data in hash to detect LLM modifications
+        const plan = this.planTasksContextParser.parsePlan();
+        const tasks = this.planTasksContextParser.parseTasks();
+        const context = this.planTasksContextParser.parseContext();
+        
         const input = {
             timestamp: new Date().toISOString().split('T')[0], // Daily granularity
-            cycleCount: this.cycleCount
+            cycleCount: this.cycleCount,
+            planUpdated: plan?.updated || '',
+            planPhase: plan?.phase || '',
+            tasksUpdated: tasks?.updated || '',
+            activeTasksCount: tasks?.active.length || 0,
+            contextUpdated: context?.updated || '',
+            contextConfidence: context?.confidence || 0
         };
         
         return crypto.createHash('sha256')
@@ -711,6 +806,28 @@ export class CognitiveScheduler {
             inputHash: '',
             success: false
         };
+    }
+    
+    /**
+     * ✅ P0-DZ-013: Process queued cycle triggers sequentially
+     */
+    private async processQueue(): Promise<void> {
+        if (this.processingQueue || this.isRunning || this.cycleQueue.length === 0) {
+            return;
+        }
+        
+        this.processingQueue = true;
+        
+        try {
+            while (this.cycleQueue.length > 0 && !this.isRunning) {
+                const trigger = this.cycleQueue.shift();
+                if (trigger) {
+                    await this.runCycle(trigger);
+                }
+            }
+        } finally {
+            this.processingQueue = false;
+        }
     }
     
     /**
@@ -940,6 +1057,44 @@ export class CognitiveScheduler {
             
             this.logger.system(`📊 Loaded cognitive history: ${history.cycles?.length || 0} cycles`, '📊');
         }
+    }
+    
+    /**
+     * ✅ P0-DZ-010: Calculate cognitive load from cycle phases
+     */
+    private calculateCognitiveLoad(phases: { patterns: number; correlations: number; forecasts: number; adrs: number }, context: ContextData): number {
+        // Simple heuristic: more patterns/correlations = higher load
+        const totalOutputs = phases.patterns + phases.correlations + phases.forecasts + phases.adrs;
+        return Math.min(100, Math.round(totalOutputs * 5)); // 5% per output, max 100%
+    }
+    
+    /**
+     * ✅ P0-DZ-010: Calculate next steps from cycle results
+     */
+    private calculateNextSteps(phases: { patterns: number; correlations: number; forecasts: number; adrs: number }, context: ContextData): string[] {
+        const steps: string[] = [];
+        if (phases.adrs > 0) steps.push('Review ADR proposals');
+        if (phases.forecasts > 0) steps.push('Evaluate forecasts');
+        if (phases.patterns > 0) steps.push('Analyze new patterns');
+        return steps;
+    }
+    
+    /**
+     * ✅ P0-DZ-010: Calculate plan drift from context
+     */
+    private calculatePlanDrift(context: ContextData): number {
+        // Simple heuristic: low confidence = high drift
+        return context.confidence ? Math.round((1 - context.confidence) * 100) : 0;
+    }
+    
+    /**
+     * ✅ P0-DZ-010: Calculate risks from cycle results
+     */
+    private calculateRisks(phases: { patterns: number; correlations: number; forecasts: number; adrs: number }, context: ContextData): string[] {
+        const risks: string[] = [];
+        if (phases.patterns === 0 && phases.correlations === 0) risks.push('No patterns detected - workspace may be inactive');
+        if (context.confidence && context.confidence < 0.5) risks.push('Low confidence - plan may be drifting');
+        return risks;
     }
     
     /**

@@ -76,27 +76,37 @@ export class ForecastEngine {
 
     /**
      * Generate forecasts from patterns, correlations, and market signals
+     * ✅ P0-CORE-00: Enhanced logging for diagnostic
      */
     public async generate(): Promise<Forecast[]> {
+        console.log(`[P0-CORE-00] ForecastEngine.generate() started`);
         console.log('🔮 ForecastEngine: Starting forecast generation...');
 
         // Load patterns
         const patterns = await this.loadPatterns();
+        console.log(`[P0-CORE-00] ForecastEngine: Loaded ${patterns?.length || 0} patterns`);
+        
         if (!patterns || patterns.length === 0) {
+            console.log(`[P0-CORE-00] ForecastEngine: No patterns available for forecasting - returning []`);
             console.log('🔮 No patterns available for forecasting');
             return [];
         }
 
         // Load correlations
         const correlations = await this.loadCorrelations();
+        console.log(`[P0-CORE-00] ForecastEngine: Loaded ${correlations?.length || 0} correlations`);
+        
         if (!correlations || correlations.length === 0) {
+            console.log(`[P0-CORE-00] ForecastEngine: No correlations available for forecasting - returning []`);
             console.log('🔮 No correlations available for forecasting');
             return [];
         }
 
         // Load market signals
         const marketSignals = await this.loadMarketSignals();
+        console.log(`[P0-CORE-00] ForecastEngine: Loaded ${marketSignals?.length || 0} market signals`);
 
+        console.log(`[P0-CORE-00] ForecastEngine: Analyzing ${correlations.length} correlations, ${patterns.length} patterns, ${marketSignals.length} market signals`);
         console.log(`📈 ${correlations.length} correlations analyzed, ${marketSignals.length} market signals loaded`);
 
         const forecasts: Forecast[] = [];
@@ -207,6 +217,7 @@ export class ForecastEngine {
             await this.appendToLedger(forecast);
         }
 
+        console.log(`[P0-CORE-00] ForecastEngine: Final result: ${allForecasts.length} total forecasts (${existingForecasts.length} existing + ${dedupedNewForecasts.length} new)`);
         return allForecasts;
     }
 

@@ -79,11 +79,11 @@
 .rl4-btn--ghost {
   background: transparent;
   color: var(--rl4-text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--vscode-panel-border);
 }
 
 .rl4-btn--ghost:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--vscode-textCodeBlock-background);
   border-color: var(--rl4-violet);
   color: var(--rl4-violet);
 }
@@ -204,7 +204,7 @@
 /* === Progress Bar === */
 .rl4-progress {
   height: 8px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--vscode-textCodeBlock-background);
   border-radius: var(--rl4-radius-full);
   overflow: hidden;
 }

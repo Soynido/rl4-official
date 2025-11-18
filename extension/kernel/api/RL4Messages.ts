@@ -350,7 +350,7 @@ export function generateRestoreMessage(rl4Path: string): RL4RestoreIndex | null 
             label: `Snapshot ${cycleId}`,
             artifacts: {
               snapshot: f,
-              state: 'kernel/state.json.gz' // Example artifact path
+              state: 'artifacts/state.json.gz' // Example artifact path (unified path)
             }
           };
         })

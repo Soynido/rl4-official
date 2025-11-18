@@ -27,6 +27,40 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
+import { WriteTracker } from '../WriteTracker';
+
+// ✅ P0-KPI-SEPARATION-01: Separated KPI types for LLM vs Kernel
+export interface KPIRecordLLM {
+  cycle: number;
+  cognitive_load: number;
+  risks: string[];
+  next_steps: string[];
+  plan_drift: number;
+  opportunities?: string[];
+  updated: string;
+}
+
+export interface KPIRecordKernel {
+  cycle: number;
+  cognitive_load: number;
+  drift: number;
+  patterns_detected: number;
+  tasks_active: number;
+  queue_length?: number;
+  scheduler_state?: 'idle' | 'running' | 'queued';
+  updated: string;
+}
+
+// ✅ DEPRECATED: Use KPIRecordLLM or KPIRecordKernel instead
+// Kept for backward compatibility during migration
+export interface KPIRecord {
+  cycle: number;
+  cognitive_load: number;
+  risks: string[];
+  next_steps: string[];
+  plan_drift: number;
+  updated: string;
+}
 
 // Types for parsed data
 export interface PlanData {
@@ -57,6 +91,9 @@ export interface ContextData {
   version: string;
   updated: string;
   confidence?: number;
+  kpis_llm?: KPIRecordLLM[];      // ✅ P0-KPI-SEPARATION-01: LLM-calculated KPIs (reasoning, patterns, goals)
+  kpis_kernel?: KPIRecordKernel[]; // ✅ P0-KPI-SEPARATION-01: Kernel-calculated KPIs (cycle count, latency, queue)
+  kpis?: KPIRecord[];              // ✅ DEPRECATED: Kept for backward compatibility during migration
   
   // Content
   activeFiles: string[];
@@ -71,6 +108,9 @@ export interface ContextData {
     uptime: string;
   };
   observations: string[];
+  tasks?: {
+    active: Array<{ completed: boolean; task: string; timestamp?: string }>;
+  };
 }
 
 export interface WorkspaceData {
@@ -167,10 +207,28 @@ export class PlanTasksContextParser {
       const content = fs.readFileSync(contextPath, 'utf8');
       const { frontmatter, markdown } = this.parseFrontmatter(content);
 
+      // ✅ P0-KPI-SEPARATION-01-migration: Backward compatibility migration
+      // If old format `kpis` exists and new formats don't, migrate to kpis_kernel
+      if (frontmatter.kpis && !frontmatter.kpis_llm && !frontmatter.kpis_kernel) {
+        console.log('[PlanTasksContextParser] Migrating old kpis format to kpis_kernel');
+        frontmatter.kpis_kernel = (frontmatter.kpis || []).map((kpi: any) => ({
+          cycle: kpi.cycle,
+          cognitive_load: kpi.cognitive_load || 0,
+          drift: kpi.plan_drift || 0,
+          patterns_detected: 0,
+          tasks_active: 0,
+          updated: kpi.updated
+        }));
+        // Don't delete old kpis yet - let it be overwritten on next save
+      }
+
       return {
         version: frontmatter.version || '1.0.0',
         updated: frontmatter.updated || new Date().toISOString(),
         confidence: frontmatter.confidence,
+        kpis_llm: frontmatter.kpis_llm || [],      // ✅ P0-KPI-SEPARATION-01: LLM KPIs
+        kpis_kernel: frontmatter.kpis_kernel || [], // ✅ P0-KPI-SEPARATION-01: Kernel KPIs
+        kpis: frontmatter.kpis || [],              // ✅ DEPRECATED: Kept for backward compatibility
         
         activeFiles: this.extractListItems(markdown, '## Active Files'),
         recentActivity: this.parseRecentActivity(markdown),
@@ -468,6 +526,8 @@ export class PlanTasksContextParser {
       version: '1.0.0',
       updated: new Date().toISOString(),
       confidence: 0.5,
+      kpis_llm: [],      // ✅ P0-KPI-SEPARATION-01: Initialize empty LLM KPIs
+      kpis_kernel: [],   // ✅ P0-KPI-SEPARATION-01: Initialize empty Kernel KPIs
       activeFiles: [],
       recentActivity: {
         cycles: 0,
@@ -490,6 +550,10 @@ export class PlanTasksContextParser {
     const planPath = path.join(this.rl4Path, 'Plan.RL4');
     
     try {
+      // ✅ P0-HOTFIX: Mark as internal write BEFORE writing
+      const writeTracker = WriteTracker.getInstance();
+      writeTracker.markInternalWrite(planPath);
+      
       const frontmatter = {
         version: data.version,
         updated: data.updated,
@@ -534,6 +598,10 @@ ${data.constraints.length > 0 ? `## Constraints\n${data.constraints.map(c => `- 
     const tasksPath = path.join(this.rl4Path, 'Tasks.RL4');
     
     try {
+      // ✅ P0-HOTFIX: Mark as internal write BEFORE writing
+      const writeTracker = WriteTracker.getInstance();
+      writeTracker.markInternalWrite(tasksPath);
+      
       const frontmatter = {
         version: data.version,
         updated: data.updated,
@@ -570,10 +638,17 @@ ${data.completed.length > 0 ? `## Completed (last 24h)\n${data.completed.map(c =
     const contextPath = path.join(this.rl4Path, 'Context.RL4');
     
     try {
+      // ✅ P0-HOTFIX: Mark as internal write BEFORE writing
+      const writeTracker = WriteTracker.getInstance();
+      writeTracker.markInternalWrite(contextPath);
+      
       const frontmatter = {
         version: data.version,
         updated: data.updated,
-        confidence: data.confidence
+        confidence: data.confidence,
+        kpis_llm: data.kpis_llm || [],      // ✅ P0-KPI-SEPARATION-03: LLM KPIs (preserved)
+        kpis_kernel: data.kpis_kernel || [] // ✅ P0-KPI-SEPARATION-03: Kernel KPIs (preserved)
+        // ❌ DEPRECATED: kpis field no longer written (migrated to kpis_kernel)
       };
 
       const content = `---
@@ -598,7 +673,7 @@ ${data.observations.length > 0 ? `## Observations\n${data.observations.map(o => 
 `;
 
       fs.writeFileSync(contextPath, content, 'utf8');
-      console.log('[PlanTasksContextParser] ✅ Context.RL4 saved');
+      console.log('[PlanTasksContextParser] ✅ Context.RL4 saved (internal write tracked)');
       return true;
     } catch (error) {
       console.error('[PlanTasksContextParser] Failed to save Context.RL4:', error);

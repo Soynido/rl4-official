@@ -52,25 +52,33 @@ export class ADRGeneratorV2 {
 
     /**
      * Generate ADR proposals from forecasts
+     * ✅ P0-CORE-00: Enhanced logging for diagnostic
      */
     public async generateProposals(): Promise<ProposedADR[]> {
+        console.log(`[P0-CORE-00] ADRGeneratorV2.generateProposals() started`);
         console.log('🧩 ADRGeneratorV2: Starting ADR proposal generation...');
 
         // Ensure auto ADR directory exists
         if (!fs.existsSync(this.autoAdrDir)) {
             fs.mkdirSync(this.autoAdrDir, { recursive: true });
+            console.log(`[P0-CORE-00] ADRGeneratorV2: Created auto ADR directory: ${this.autoAdrDir}`);
         }
 
         // Load forecasts
         const forecasts = await this.loadForecasts();
+        console.log(`[P0-CORE-00] ADRGeneratorV2: Loaded ${forecasts?.length || 0} forecasts`);
+        
         if (!forecasts || forecasts.length === 0) {
+            console.log(`[P0-CORE-00] ADRGeneratorV2: No forecasts available for ADR generation - returning []`);
             console.log('🧩 No forecasts available for ADR generation');
             return [];
         }
 
         // Load patterns for context
         const patterns = await this.loadPatterns();
+        console.log(`[P0-CORE-00] ADRGeneratorV2: Loaded ${patterns?.length || 0} patterns for context`);
 
+        console.log(`[P0-CORE-00] ADRGeneratorV2: Processing ${forecasts.length} forecasts...`);
         console.log(`📊 Processing ${forecasts.length} forecasts...`);
 
         const proposals: ProposedADR[] = [];
@@ -98,6 +106,7 @@ export class ADRGeneratorV2 {
         // Generate proposal index
         await this.generateProposalIndex(proposals);
 
+        console.log(`[P0-CORE-00] ADRGeneratorV2: Final result: ${proposals.length} proposals generated`);
         console.log(`✅ ADR Synthesizer: ${proposals.length} proposals generated (awaiting validation)`);
 
         return proposals;

@@ -2,13 +2,15 @@
  * RL4 Kernel Bootstrap
  * 
  * Loads compressed kernel artifacts (state, universals, forecast metrics)
- * from .reasoning_rl4/kernel/ directory at initialization.
+ * from .reasoning_rl4/artifacts/ directory at initialization.
  * 
  * Artifacts Format:
  * - state.json.gz: Current kernel state snapshot
  * - universals.json.gz: Universal patterns and cognitive rules
  * - forecast_metrics.json.gz: Forecast accuracy baseline
  * - universals_analysis.json.gz: Analysis of universal patterns
+ * 
+ * NOTE: Unified with CognitiveScheduler artifact path (.reasoning_rl4/artifacts/)
  */
 
 import * as fs from 'fs';
@@ -31,7 +33,8 @@ export class KernelBootstrap {
      * @param workspaceRoot - Root path of the workspace
      */
     static init(workspaceRoot: string): void {
-        this.kernelDir = path.join(workspaceRoot, '.reasoning_rl4', 'kernel');
+        // FIX: Unified artifact path (was: '.reasoning_rl4/kernel', now: '.reasoning_rl4/artifacts')
+        this.kernelDir = path.join(workspaceRoot, '.reasoning_rl4', 'artifacts');
     }
 
     /**

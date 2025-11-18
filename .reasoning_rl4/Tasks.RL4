@@ -8,6 +8,123 @@ bias: 30.61
 
 ## Active (P0) — URGENT
 
+### 🔴 SPRINT P0-REPAIR: Full RL4 Repair & Re-Bootstrap (2h estimated)
+
+**⚠️ SYSTEM CRITICAL:** Full kernel + ledger + RBOM repair required
+**🎯 OBJECTIF:** Repartir sur une base 100% propre et opérationnelle
+
+#### **Phase 0: Pre-Repair Diagnostics (15min)** 🔴 CRITICAL
+- [ ] [P0] Verify .reasoning_rl4 folder structure @rl4:id=P0-REPAIR-00-verify
+  - Check for duplicate .reasoning_rl4 folders
+  - List all submodules with .reasoning_rl4
+  - Propose cleanup if duplicates found
+  - Status: pending
+
+- [ ] [P0] Diagnose ledger corruption @rl4:id=P0-REPAIR-00-ledger
+  - Read adr-ledger.jsonl and validate JSON format
+  - Check for invalid entries, sequential issues, missing signatures
+  - Determine if genesis rebuild is required
+  - Status: pending
+
+- [ ] [P0] Diagnose kernel state @rl4:id=P0-REPAIR-00-kernel
+  - Check if kernel/state.json exists and is valid
+  - Check if kernel/manifest.json is coherent
+  - Determine if full kernel reset is required
+  - Status: pending
+
+#### **Phase 1: Ledger Repair (30min)** 🔴 CRITICAL
+- [ ] [P0] Backup existing ledger @rl4:id=P0-REPAIR-01-backup
+  - Copy adr-ledger.jsonl to adr-ledger.jsonl.backup
+  - Timestamp: 2025-11-18T15:05:00Z
+  - Status: pending
+
+- [ ] [P0] Regenerate ledger genesis @rl4:id=P0-REPAIR-01-genesis
+  - Create clean genesis entry in adr-ledger.jsonl
+  - Format: { type: "genesis", timestamp, signature, merkleRoot }
+  - Purge all invalid entries
+  - Status: pending
+
+#### **Phase 2: Kernel Repair (30min)** 🔴 CRITICAL
+- [ ] [P0] Reset kernel state @rl4:id=P0-REPAIR-02-state
+  - Delete kernel/state.json if exists
+  - Clear any stale state artifacts
+  - Status: pending
+
+- [ ] [P0] Regenerate kernel manifest @rl4:id=P0-REPAIR-02-manifest
+  - Rebuild kernel/manifest.json from scratch
+  - Include: version, timestamp, cycleCount, artifacts
+  - Status: pending
+
+- [ ] [P0] Rebuild cognitive index @rl4:id=P0-REPAIR-02-index
+  - Scan extension/kernel/**/*.ts for cognitive modules
+  - Generate index.json with module registry
+  - Status: pending
+
+#### **Phase 3: Traces & Config Cleanup (20min)** 🟡 MEDIUM
+- [ ] [P0] Purge incomplete traces @rl4:id=P0-REPAIR-03-traces
+  - Check traces/ directory for coherence
+  - Remove any incomplete or corrupted trace files
+  - Create fresh traces/ structure
+  - Status: pending
+
+- [ ] [P0] Regenerate runtime config @rl4:id=P0-REPAIR-03-config
+  - Recreate settings.json if incoherent
+  - Disable any service worker references
+  - Ensure WebView config is clean
+  - Status: pending
+
+#### **Phase 4: RBOM Revalidation (20min)** 🟡 MEDIUM
+- [ ] [P0] Recalculate RBOM hashes @rl4:id=P0-REPAIR-04-hashes
+  - Scan all RBOM entries
+  - Recalculate merkleRoot for each node
+  - Verify chain continuity
+  - Status: pending
+
+- [ ] [P0] Regenerate RBOM metadata @rl4:id=P0-REPAIR-04-metadata
+  - Update timestamps, signatures, versions
+  - Ensure all metadata fields are valid
+  - Status: pending
+
+#### **Phase 5: Kernel Restart (15min)** 🔴 CRITICAL
+- [ ] [P0] Execute kernel boot sequence @rl4:id=P0-REPAIR-05-boot
+  - Initialize TimerRegistry, StateRegistry, HealthMonitor
+  - Bootstrap CognitiveScheduler
+  - Verify kernel.isReady = true
+  - Status: pending
+
+- [ ] [P0] Bootstrap WebView @rl4:id=P0-REPAIR-05-webview
+  - Recreate WebView panel
+  - Ensure HTML/JS assets are loaded
+  - Verify message bridge is active
+  - Status: pending
+
+- [ ] [P0] Reconnect ULTRA account @rl4:id=P0-REPAIR-05-ultra
+  - Verify workspace signature
+  - Reconnect to RL4 services if needed
+  - Status: pending
+
+#### **Phase 6: Validation Tests (15min)** 🟢 LOW
+- [ ] [P0] Verify kernel ready @rl4:id=P0-REPAIR-06-ready
+  - Check kernel.isReady flag
+  - Verify no SAFE MODE active
+  - Confirm cycle execution < 10ms
+  - Status: pending
+
+- [ ] [P0] Deep verification (0 anomalies) @rl4:id=P0-REPAIR-06-deep
+  - Run deepVerification() on ledger
+  - Check RBOM chain integrity
+  - Verify all artifacts are valid
+  - Status: pending
+
+- [ ] [P0] WebView interaction test @rl4:id=P0-REPAIR-06-ui
+  - Open RL4 Dashboard
+  - Verify all CTAs are clickable
+  - Test snapshot generation workflow
+  - Confirm 0 console errors
+  - Status: pending
+
+---
+
 ### 🔴 SPRINT E4.1: Memory Safety — CRITICAL FIX (4h45min estimated)
 
 **⚠️ BUG CRITIQUE:** Extension-host 770 MB + Renderer 1.2 GB → Memory leaks

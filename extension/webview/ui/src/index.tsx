@@ -18,5 +18,3 @@ root.render(
     <App />
   </React.StrictMode>
 );
-
-console.log('🧠 Reasoning Layer V3 Perceptual UI initialized');

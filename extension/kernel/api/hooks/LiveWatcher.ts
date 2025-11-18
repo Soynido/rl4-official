@@ -11,10 +11,13 @@
  * - timelines/*.json updated → Refresh timeline
  * 
  * Exclusions: .reasoning_rl4/cache/ (éviter boucles infinies)
+ * 
+ * ✅ P0-HOTFIX: Ignore internal writes to prevent infinite loop
  */
 
 import * as chokidar from 'chokidar';
 import * as path from 'path';
+import { WriteTracker } from '../../WriteTracker';
 
 export type RL4UpdateType = 
     | 'patterns'
@@ -24,6 +27,9 @@ export type RL4UpdateType =
     | 'timeline'
     | 'adrs'
     | 'context'
+    | 'plan_rl4'
+    | 'tasks_rl4'
+    | 'context_rl4'
     | 'unknown';
 
 export interface RL4UpdateEvent {
@@ -33,12 +39,15 @@ export interface RL4UpdateEvent {
 }
 
 export type RL4UpdateCallback = (event: RL4UpdateEvent) => void;
+export type RL4FileChangeCallback = (file: string) => void;
 
 export class LiveWatcher {
     private workspaceRoot: string;
     private watcher: chokidar.FSWatcher | null = null;
     private callbacks: RL4UpdateCallback[] = [];
+    private rl4FileCallbacks: RL4FileChangeCallback[] = [];
     private isWatching: boolean = false;
+    private lastRL4ChangeTime: Map<string, number> = new Map(); // Debounce tracking
     
     constructor(workspaceRoot: string) {
         this.workspaceRoot = workspaceRoot;
@@ -98,6 +107,21 @@ export class LiveWatcher {
     }
     
     /**
+     * Register callback for .RL4 file changes (Plan, Tasks, Context)
+     * This triggers cognitive cycles when LLM modifies .RL4 files
+     */
+    onRL4FileChange(callback: RL4FileChangeCallback): void {
+        this.rl4FileCallbacks.push(callback);
+    }
+    
+    /**
+     * Remove .RL4 file change callback
+     */
+    offRL4FileChange(callback: RL4FileChangeCallback): void {
+        this.rl4FileCallbacks = this.rl4FileCallbacks.filter(cb => cb !== callback);
+    }
+    
+    /**
      * Register callback to receive update events
      */
     onUpdate(callback: RL4UpdateCallback): void {
@@ -114,10 +138,11 @@ export class LiveWatcher {
     /**
      * Get watcher status
      */
-    getStatus(): { watching: boolean; callbacks: number } {
+    getStatus(): { watching: boolean; callbacks: number; rl4FileCallbacks: number } {
         return {
             watching: this.isWatching,
-            callbacks: this.callbacks.length
+            callbacks: this.callbacks.length,
+            rl4FileCallbacks: this.rl4FileCallbacks.length
         };
     }
     
@@ -126,6 +151,38 @@ export class LiveWatcher {
     private handleFileChange(filePath: string): void {
         const relativePath = path.relative(this.workspaceRoot, filePath);
         const updateType = this.detectUpdateType(relativePath);
+        const fileName = path.basename(filePath);
+        
+        // ✅ P0-HOTFIX: Check if this is an internal write that should be ignored
+        const writeTracker = WriteTracker.getInstance();
+        if (writeTracker.shouldIgnoreChange(filePath)) {
+            console.log(`⏭️  Ignoring internal write: ${fileName} (kernel write within 120s)`);
+            return; // Skip this change completely
+        }
+        
+        // ✅ PHASE 2: Detect .RL4 file changes and trigger cognitive cycle
+        if (['Plan.RL4', 'Tasks.RL4', 'Context.RL4'].includes(fileName)) {
+            // Debounce: Only trigger if 500ms have passed since last change
+            const now = Date.now();
+            const lastChange = this.lastRL4ChangeTime.get(fileName) || 0;
+            
+            if (now - lastChange > 500) {
+                this.lastRL4ChangeTime.set(fileName, now);
+                
+                console.log(`✅ External change detected: ${fileName}, triggering cycle...`);
+                
+                // Notify RL4 file callbacks (triggers cognitive cycle)
+                for (const callback of this.rl4FileCallbacks) {
+                    try {
+                        callback(relativePath);
+                    } catch (error) {
+                        console.error('❌ RL4 file callback error:', error);
+                    }
+                }
+            } else {
+                console.log(`⏭️  Debouncing ${fileName} (too soon after last change)`);
+            }
+        }
         
         const event: RL4UpdateEvent = {
             type: updateType,
@@ -133,7 +190,7 @@ export class LiveWatcher {
             timestamp: new Date().toISOString()
         };
         
-        // Notify all callbacks
+        // Notify all callbacks (WebView updates)
         for (const callback of this.callbacks) {
             try {
                 callback(event);
@@ -146,6 +203,19 @@ export class LiveWatcher {
     }
     
     private detectUpdateType(relativePath: string): RL4UpdateType {
+        const fileName = path.basename(relativePath);
+        
+        // Detect .RL4 files
+        if (fileName === 'Plan.RL4') {
+            return 'plan_rl4';
+        }
+        if (fileName === 'Tasks.RL4') {
+            return 'tasks_rl4';
+        }
+        if (fileName === 'Context.RL4') {
+            return 'context_rl4';
+        }
+        
         if (relativePath.includes('patterns.json')) {
             return 'patterns';
         }

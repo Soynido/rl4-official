@@ -3,12 +3,13 @@
  * Synchronisation de l'état cognitif avec Cursor via interface immersive
  */
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRL4Store } from '../api/useRL4Store';
 
 export function WhereAmI() {
   const snapshot = useRL4Store((s) => s.snapshot);
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   if (!snapshot) {
     return (
@@ -185,11 +186,27 @@ export function WhereAmI() {
     try {
       await navigator.clipboard.writeText(prompt);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+      }
+      
+      copyTimerRef.current = setTimeout(() => {
+        setCopied(false);
+        copyTimerRef.current = null;
+      }, 2000);
     } catch (err) {
       console.error('Failed to copy cognitive state:', err);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleOpenInCursor = () => {
     const encoded = encodeURIComponent(prompt);
@@ -275,7 +292,8 @@ export function WhereAmI() {
             height: '3px',
             borderRadius: 'var(--rl4-radius-full)',
             marginTop: 'var(--rl4-space-sm)',
-            background: 'linear-gradient(90deg, transparent 0%, rgba(22, 247, 181, 0.3) 25%, rgba(22, 247, 181, 0.4) 50%, rgba(22, 247, 181, 0.3) 75%, transparent 100%)'
+            background: 'linear-gradient(90deg, transparent 0%, var(--vscode-inputValidation-infoBorder) 25%, var(--vscode-inputValidation-infoBorder) 50%, var(--vscode-inputValidation-infoBorder) 75%, transparent 100%)',
+            opacity: '0.3'
           }} />
         </div>
 
@@ -307,7 +325,8 @@ export function WhereAmI() {
             height: '3px',
             borderRadius: 'var(--rl4-radius-full)',
             marginTop: 'var(--rl4-space-sm)',
-            background: 'linear-gradient(90deg, transparent 0%, rgba(248, 0, 124, 0.3) 25%, rgba(248, 0, 124, 0.4) 50%, rgba(248, 0, 124, 0.3) 75%, transparent 100%)'
+            background: 'linear-gradient(90deg, transparent 0%, var(--vscode-textLink-foreground) 25%, var(--vscode-textLink-foreground) 50%, var(--vscode-textLink-foreground) 75%, transparent 100%)',
+            opacity: '0.3'
           }} />
         </div>
       </div>

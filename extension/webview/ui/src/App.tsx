@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import './App.css';
 import { 
   CognitiveLoadCard, 
@@ -15,13 +15,19 @@ import {
 } from './components/PatternsCard';
 import { 
   parseContextRL4, 
-  getMockKPIData,
   type CognitiveLoadData,
   type NextTasksData,
   type PlanDriftData,
   type RisksData
 } from './utils/contextParser';
-import { logger } from './utils/logger'; // ✅ NEW: Memory-safe logger
+import { logger } from './utils/logger';
+import { useMessageHandler } from './hooks/useMessageHandler';
+import { useKernelPolling } from './hooks/useKernelPolling';
+import { useFeedbackTimer } from './hooks/useFeedbackTimer';
+import { useGitHubIntegration } from './hooks/useGitHubIntegration';
+import { useCommitPrompt } from './hooks/useCommitPrompt';
+import { useKPIs } from './hooks/useKPIs';
+import { createMessageHandlers } from './handlers/messageHandlers';
 
 // Declare vscode API
 declare global {
@@ -66,7 +72,40 @@ const FileLink = ({ fileName }: { fileName: string }) => {
 };
 
 export default function App() {
-  // Tabs and Dev proposals state
+  // ============================================================================
+  // HOOKS (Memory-leak free, modular)
+  // ============================================================================
+  const { feedback, setFeedbackWithTimeout } = useFeedbackTimer();
+  const { githubStatus, setGithubStatus, handleConnectGitHub } = useGitHubIntegration();
+  const { 
+    commitPrompt, 
+    setCommitPrompt,
+    commitCommand,
+    setCommitCommand,
+    commitWhy,
+    setCommitWhy,
+    commitPreview,
+    setCommitPreview,
+    handleGenerateCommitPrompt,
+    handleValidateCommit,
+    handleCommitCommandChange,
+    resetCommit
+  } = useCommitPrompt();
+  const { 
+    cognitiveLoad, 
+    setCognitiveLoad,
+    nextTasks, 
+    setNextTasks,
+    planDrift, 
+    setPlanDrift,
+    risks, 
+    setRisks,
+    showKPIs
+  } = useKPIs();
+  
+  // ============================================================================
+  // LOCAL UI STATE (kept in App.tsx)
+  // ============================================================================
   const [activeTab, setActiveTab] = useState<'control' | 'dev' | 'insights' | 'about'>('control');
   const [devBadge, setDevBadge] = useState<{ newCount: number; changedCount: number }>({ newCount: 0, changedCount: 0 });
   const [proposals, setProposals] = useState<Array<{
@@ -93,44 +132,8 @@ export default function App() {
   }>>([]);
   const [prompt, setPrompt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
   const [deviationMode, setDeviationMode] = useState<DeviationMode>('flexible');
   
-  // ✅ FIX #2: Timer management to prevent memory leaks
-  const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // ✅ FIX #2: Helper to set feedback with auto-cleanup
-  const setFeedbackWithTimeout = (message: string, duration: number) => {
-    // Clear existing timer
-    if (feedbackTimerRef.current) {
-      clearTimeout(feedbackTimerRef.current);
-    }
-    
-    setFeedback(message);
-    
-    feedbackTimerRef.current = setTimeout(() => {
-      setFeedback(null);
-      feedbackTimerRef.current = null;
-    }, duration);
-  };
-  
-  // KPI States
-  const [cognitiveLoad, setCognitiveLoad] = useState<CognitiveLoadData | null>(null);
-  const [nextTasks, setNextTasks] = useState<NextTasksData | null>(null);
-  const [planDrift, setPlanDrift] = useState<PlanDriftData | null>(null);
-  const [risks, setRisks] = useState<RisksData | null>(null);
-  const [showKPIs, setShowKPIs] = useState(false);
-  
-  // GitHub connection state
-  const [githubStatus, setGithubStatus] = useState<{ connected: boolean; repo?: string; reason?: string } | null>(null);
-  
-  // Commit prompt state
-  const [commitPrompt, setCommitPrompt] = useState<string | null>(null);
-  const [commitCommand, setCommitCommand] = useState<string | null>(null);
-  const [commitWhy, setCommitWhy] = useState<string | null>(null);
-  const [commitPreview, setCommitPreview] = useState<{ title?: string; body?: string } | null>(null);
-  
-  // Snapshot metadata state
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [compressionMetrics, setCompressionMetrics] = useState<{
     originalSize: number;
@@ -139,12 +142,10 @@ export default function App() {
     mode: string;
   } | null>(null);
 
-  // Terminal Patterns state
   const [patterns, setPatterns] = useState<TaskPattern[]>([]);
   const [patternAnomalies, setPatternAnomalies] = useState<PatternAnomaly[]>([]);
   const [insightsSubTab, setInsightsSubTab] = useState<'kpis' | 'patterns'>('kpis');
 
-  // Auto-Suggestions state
   interface TaskSuggestion {
     taskId: string;
     taskTitle: string;
@@ -160,7 +161,6 @@ export default function App() {
   }
   const [suggestions, setSuggestions] = useState<TaskSuggestion[]>([]);
 
-  // Ad-Hoc Actions state
   interface AdHocAction {
     timestamp: string;
     action: 'npm_install' | 'file_created' | 'git_commit' | 'terminal_command' | 'manual_marker';
@@ -175,12 +175,12 @@ export default function App() {
   }
   const [adHocActions, setAdHocActions] = useState<AdHocAction[]>([]);
 
-  // Kernel Status state
   interface KernelStatus {
     ready: boolean;
     message?: string;
     initializing?: boolean;
     error?: boolean;
+    safeMode?: boolean;
     status?: {
       running: boolean;
       uptime: number;
@@ -191,274 +191,68 @@ export default function App() {
       cycleCount: number;
       safeMode: boolean;
       corruptionReason: string | null;
+      cycleHealth?: {
+        success: boolean;
+        duration: number;
+        phases?: any[];
+        error?: string;
+      };
     };
   }
   const [kernelStatus, setKernelStatus] = useState<KernelStatus | null>(null);
 
-  // 🟥 TEST: Count renders (dev mode only)
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.count("RENDER");
-    }
-  }, []); // ✅ FIX #1: Added empty dependency array - runs only once on mount
+  // ============================================================================
+  // MESSAGE HANDLING (Unified, memory-leak free)
+  // ============================================================================
+  const messageHandlers = useMemo(() => createMessageHandlers({
+    setProposals,
+    setDevBadge,
+    setPatchPreview,
+    setPrompt,
+    setLoading,
+    setAnomalies,
+    setCompressionMetrics,
+    setTaskVerifications,
+    setKernelStatus,
+    setPatterns,
+    setPatternAnomalies,
+    setSuggestions,
+    setAdHocActions,
+    setFeedbackWithTimeout,
+    setGithubStatus,
+    setCommitPrompt,
+    handleCommitCommandChange,
+    resetCommit,
+    setCognitiveLoad,
+    setNextTasks,
+    setPlanDrift,
+    setRisks,
+    logger,
+    parseContextRL4
+  }), [
+    setFeedbackWithTimeout,
+    handleCommitCommandChange,
+    resetCommit,
+    setCognitiveLoad,
+    setNextTasks,
+    setPlanDrift,
+    setRisks
+  ]);
 
-  // Listen for messages from extension
-  useEffect(() => {
-    const messageHandler = (event: MessageEvent) => {
-      const message = event.data;
-      logger.log('[RL4 WebView] Received message:', message.type); // ✅ FIXED: Memory-safe logging
-      
-      switch (message.type) {
-        case 'proposalsUpdated':
-          // payload: { suggestedTasks: [...], counts?: { newCount, changedCount } }
-          setProposals(Array.isArray(message.payload?.suggestedTasks) ? message.payload.suggestedTasks : []);
-          if (message.payload?.counts) {
-            setDevBadge({
-              newCount: message.payload.counts.newCount ?? 0,
-              changedCount: message.payload.counts.changedCount ?? 0
-            });
-          } else {
-            setDevBadge({ newCount: message.payload?.suggestedTasks?.length ?? 0, changedCount: 0 });
-          }
-          break;
-        
-        case 'taskLogChanged':
-          // payload: { newCount, changedCount }
-          if (message.payload) {
-            setDevBadge(prev => ({ // ✅ FIX #3: Functional update to avoid stale closure
-              newCount: message.payload.newCount ?? prev.newCount,
-              changedCount: message.payload.changedCount ?? prev.changedCount
-            }));
-          }
-          break;
-        case 'patchPreview':
-          setPatchPreview(message.payload || null);
-          setFeedbackWithTimeout('🧪 Patch preview ready', 2000); // ✅ FIX #2: Cleaned timer
-          break;
-        case 'snapshotGenerated':
-          logger.log('[RL4 WebView] Snapshot received, length:', message.payload?.length); // ✅ FIXED
-          setPrompt(message.payload);
-          setLoading(false);
-          
-          // Copy to clipboard automatically
-          if (message.payload) {
-            navigator.clipboard.writeText(message.payload).then(() => {
-              setFeedback('✅ Copied to clipboard!');
-              setTimeout(() => setFeedback(null), 3000);
-            }).catch(err => {
-              console.error('[RL4] Clipboard error:', err);
-              setFeedback('❌ Copy failed');
-              setTimeout(() => setFeedback(null), 3000);
-            });
-          }
-          break;
-          
-        case 'error':
-          console.error('[RL4 WebView] Error:', message.payload);
-          setLoading(false);
-          setFeedback('❌ Error generating snapshot');
-          setTimeout(() => setFeedback(null), 3000);
-          break;
-          
-        case 'snapshotMetadata':
-          logger.log('[RL4 WebView] Snapshot metadata received:', message.payload); // ✅ FIXED
-          if (message.payload) {
-            const anomalies = message.payload.anomalies || [];
-            const compression = message.payload.compression || null;
-            logger.log(`[RL4 WebView] Setting ${anomalies.length} anomalies, compression: ${compression ? compression.reductionPercent.toFixed(1) + '%' : 'null'}`); // ✅ FIXED
-            setAnomalies(anomalies);
-            setCompressionMetrics(compression);
-          } else {
-            logger.warn('[RL4 WebView] snapshotMetadata received but payload is empty'); // ✅ FIXED
-          }
-          break;
-          
-        case 'taskVerificationResults':
-          logger.log('[RL4 WebView] Task verification results received:', message.payload); // ✅ FIXED
-          if (message.payload && message.payload.results) {
-            setTaskVerifications(message.payload.results || []);
-            setFeedback(`✅ ${message.payload.results.length} task(s) verified`);
-            setTimeout(() => setFeedback(null), 3000);
-          }
-          break;
+  useMessageHandler(messageHandlers);
 
-        case 'taskMarkedDone':
-          logger.log('[RL4 WebView] Task marked as done:', message.payload); // ✅ FIXED
-          if (message.payload && message.payload.taskId) {
-            // Remove the verification for this task since it's now done
-            setTaskVerifications(prev => prev.filter(v => v.taskId !== message.payload.taskId));
-            setFeedback(`✅ Task ${message.payload.taskId} marked as done`);
-            setTimeout(() => setFeedback(null), 3000);
-          }
-          break;
-        
-        case 'llmResponseImported':
-          logger.log('[RL4 WebView] LLM response imported:', message.payload);
-          if (message.payload && message.payload.stats) {
-            const { patterns, correlations, forecasts, adrs } = message.payload.stats;
-            setFeedback(`✅ Imported: ${patterns} patterns, ${correlations} correlations, ${forecasts} forecasts, ${adrs} evidence`);
-            setTimeout(() => setFeedback(null), 5000);
-          }
-          break;
-        
-        case 'llmImportError':
-          logger.error('[RL4 WebView] LLM import error:', message.payload);
-          setFeedback(`❌ Import failed: ${message.payload?.message || 'Unknown error'}`);
-          setTimeout(() => setFeedback(null), 5000);
-          break;
-          
-        case 'tasksLoaded':
-          logger.log('[RL4 WebView] Tasks.RL4 loaded'); // ✅ FIXED
-          // For now, just log it. In the future, we can parse and display active tasks
-          // in the Dev tab
-          break;
-          
-        case 'adrsLoaded':
-          logger.log('[RL4 WebView] ADRs.RL4 loaded'); // ✅ FIXED
-          // For now, just log it. In the future, we can parse and display ADRs
-          // in the Insights tab
-          break;
-          
-        case 'kpisUpdated':
-          logger.log('[RL4 WebView] KPIs updated:', message.payload); // ✅ FIXED
-          if (message.payload) {
-            const parsed = parseContextRL4(message.payload);
-            setCognitiveLoad(parsed.cognitiveLoad);
-            setNextTasks(parsed.nextSteps);
-            setPlanDrift(parsed.planDrift);
-            setRisks(parsed.risks);
-            setShowKPIs(true);
-            setFeedback('✅ KPIs updated from Context.RL4');
-            setTimeout(() => setFeedback(null), 3000);
-          }
-          break;
-          
-        case 'githubStatus':
-          logger.log('[RL4 WebView] GitHub status:', message.payload); // ✅ FIXED
-          setGithubStatus(message.payload);
-          break;
-          
-        case 'githubConnected':
-          setFeedback('✅ GitHub connected successfully!');
-          setTimeout(() => setFeedback(null), 3000);
-          break;
-        
-        case 'kernelStatus':
-          logger.log('[RL4 WebView] Kernel status received:', message.payload);
-          setKernelStatus(message.payload);
-          break;
-        
-        case 'kernel:notReady':
-          logger.warn('[RL4 WebView] Kernel not ready:', message.reason);
-          setKernelStatus({
-            ready: false,
-            message: message.message || `Kernel not ready: ${message.reason}`,
-            error: true,
-            safeMode: message.safeMode || false
-          });
-          break;
-          
-        case 'githubError':
-          setFeedback(`❌ GitHub connection failed: ${message.payload || 'Unknown error'}`);
-          setTimeout(() => setFeedback(null), 5000);
-          break;
-          
-        case 'commitPromptGenerated':
-          setCommitPrompt(message.payload);
-          setFeedback('✅ Commit prompt copied to clipboard!');
-          setTimeout(() => setFeedback(null), 3000);
-          break;
-          
-        case 'commitCommandReceived':
-          setCommitCommand(message.payload);
-          setFeedback('✅ GH CLI command received from LLM');
-          setTimeout(() => setFeedback(null), 3000);
-          break;
-          
-        case 'commitExecuted':
-          setFeedback('✅ Commit created successfully!');
-          setCommitCommand(null);
-          setCommitPrompt(null);
-          setCommitWhy(null);
-          setCommitPreview(null);
-          setTimeout(() => setFeedback(null), 3000);
-          break;
-        
-        case 'patternsUpdated':
-          logger.log('[RL4 WebView] Patterns updated:', message.payload); // ✅ FIXED
-          if (message.payload) {
-            setPatterns(message.payload.patterns || []);
-            setPatternAnomalies(message.payload.anomalies || []);
-            setFeedback(`✅ ${message.payload.patterns?.length || 0} patterns loaded`);
-            setTimeout(() => setFeedback(null), 2000);
-          }
-          break;
+  // ============================================================================
+  // KERNEL POLLING (Stable, no infinite loop)
+  // ============================================================================
+  useKernelPolling(kernelStatus?.ready || false);
 
-        case 'suggestionsUpdated':
-          logger.log('[RL4 WebView] Suggestions updated:', message.payload);
-          if (message.payload) {
-            setSuggestions(message.payload.suggestions || []);
-            if (message.payload.suggestions && message.payload.suggestions.length > 0) {
-              setFeedback(`💡 ${message.payload.suggestions.length} suggestions generated`);
-              setTimeout(() => setFeedback(null), 2000);
-            }
-          }
-          break;
-
-        case 'suggestionApplied':
-          logger.log('[RL4 WebView] Suggestion applied:', message.payload);
-          if (message.payload?.success) {
-            setFeedback(`✅ Suggestion applied for task ${message.payload.taskId}`);
-            setTimeout(() => setFeedback(null), 2000);
-            // Refresh suggestions after successful apply
-            if (window.vscode) {
-              window.vscode.postMessage({ type: 'requestSuggestions' });
-            }
-          } else {
-            setFeedback(`❌ Failed to apply suggestion: ${message.payload?.error || 'Unknown error'}`);
-            setTimeout(() => setFeedback(null), 3000);
-          }
-          break;
-
-        case 'adHocActionsUpdated':
-          logger.log('[RL4 WebView] Ad-hoc actions updated:', message.payload);
-          if (message.payload) {
-            setAdHocActions(message.payload.actions || []);
-            if (message.payload.actions && message.payload.actions.length > 0) {
-              setFeedback(`🔍 ${message.payload.actions.length} ad-hoc actions detected`);
-              setTimeout(() => setFeedback(null), 2000);
-            }
-          }
-          break;
-          
-        case 'commitError':
-          setFeedback(`❌ Commit failed: ${message.payload || 'Unknown error'}`);
-          setTimeout(() => setFeedback(null), 5000);
-          break;
-          
-      }
-    };
-
-    window.addEventListener('message', messageHandler);
-    return () => window.removeEventListener('message', messageHandler);
-  }, []);
-  
-  // Load mock KPIs on mount for development
-  useEffect(() => {
-    const mockData = getMockKPIData();
-    setCognitiveLoad(mockData.cognitiveLoad);
-    setNextTasks(mockData.nextTasks);
-    setPlanDrift(mockData.planDrift);
-    setRisks(mockData.risks);
-    setShowKPIs(true);
-  }, []);
-
-  // Generate snapshot handler
-  const handleGenerateSnapshot = () => {
+  // ============================================================================
+  // UI HANDLERS (useCallback for performance)
+  // ============================================================================
+  const handleGenerateSnapshot = useCallback(() => {
     setLoading(true);
-    setFeedback(null);
     
-    logger.log('[RL4 WebView] Requesting snapshot with mode:', deviationMode); // ✅ FIXED
+    logger.log(`[RL4 WebView] Requesting snapshot with mode: ${deviationMode}`);
     
     if (window.vscode) {
       window.vscode.postMessage({ 
@@ -468,114 +262,39 @@ export default function App() {
     } else {
       console.error('[RL4] vscode API not available');
       setLoading(false);
-      setFeedback('❌ VS Code API unavailable');
+      setFeedbackWithTimeout('❌ VS Code API unavailable', 3000);
     }
-  };
+  }, [deviationMode, setFeedbackWithTimeout]);
   
-  // Connect GitHub handler
-  const handleConnectGitHub = () => {
+  const handleMarkTaskDone = useCallback((taskId: string) => {
     if (window.vscode) {
       window.vscode.postMessage({ 
-        type: 'connectGitHub'
-      });
-      setFeedback('🔗 Opening GitHub token setup...');
-    } else {
-      console.error('[RL4] vscode API not available');
-      setFeedback('❌ VS Code API unavailable');
-    }
-  };
-
-  // Check GitHub status on mount
-  useEffect(() => {
-    if (window.vscode) {
-      window.vscode.postMessage({ type: 'checkGitHubStatus' });
-    }
-  }, []);
-
-  // Request kernel status on mount and poll if not ready
-  // ✅ P0-CORE-00: Fixed infinite polling loop
-  useEffect(() => {
-    if (!window.vscode) return;
-    
-    // Request immediately
-    window.vscode.postMessage({ type: 'requestStatus' });
-    
-    // Stop polling entirely if kernel is ready
-    if (kernelStatus?.ready) return;
-    
-    // Poll every 2s ONLY if kernel is not ready
-    const pollInterval = setInterval(() => {
-      // Double-check: stop if kernel became ready
-      if (kernelStatus?.ready) {
-        clearInterval(pollInterval);
-        return;
-      }
-      window.vscode?.postMessage({ type: 'requestStatus' });
-    }, 2000); // Exactly 2 seconds
-    
-    return () => clearInterval(pollInterval);
-  }, [kernelStatus?.ready]); // ✅ Only depend on ready state, not entire kernelStatus object
-
-  // Generate commit prompt handler
-  const handleGenerateCommitPrompt = () => {
-    if (window.vscode) {
-      window.vscode.postMessage({ type: 'generateCommitPrompt' });
-      setFeedback('🔍 Collecting commit context...');
-    }
-  };
-
-  // Validate and execute commit
-  const handleValidateCommit = () => {
-    if (!commitCommand) return;
-    
-    // Extract command from RL4 validation token if present
-    let commandToExecute = commitCommand;
-    
-    if (commitCommand.includes('RL4_COMMIT_VALIDATE')) {
-      // Parse the validation token block (handle both single-line and multi-line formats)
-      const tokenMatch = commitCommand.match(/RL4_COMMIT_VALIDATE\s*(.+?)\s*RL4_COMMIT_END/s);
-      if (tokenMatch) {
-        const tokenContent = tokenMatch[1];
-        const commandMatch = tokenContent.match(/COMMAND:\s*(.+?)(?:\s*RL4_COMMIT_END|$)/s);
-        if (commandMatch) {
-          commandToExecute = commandMatch[1].trim().replace(/\s+/g, ' ');
-        } else {
-          setFeedback('❌ Could not extract command from validation token');
-          setTimeout(() => setFeedback(null), 3000);
-          return;
-        }
-      } else {
-        setFeedback('❌ Invalid validation token format');
-        setTimeout(() => setFeedback(null), 3000);
-        return;
-      }
-    }
-    
-    // Validate command format
-    if (!commandToExecute.includes('gh pr create')) {
-      setFeedback('❌ Invalid command format. Must be a gh pr create command.');
-      setTimeout(() => setFeedback(null), 3000);
-      return;
-    }
-    
-    if (window.vscode) {
-      window.vscode.postMessage({ 
-        type: 'executeCommitCommand',
-        command: commandToExecute
-      });
-      setFeedback('⏳ Creating commit...');
-    }
-  };
-
-  const handleMarkTaskDone = (taskId: string) => {
-    if (window.vscode) {
-      window.vscode.postMessage({
         type: 'markTaskDone',
         taskId
       });
-      setFeedback(`⏳ Marking task ${taskId} as done...`);
+      setFeedbackWithTimeout(`⏳ Marking task ${taskId} as done...`, 2000);
     }
-  };
+  }, [setFeedbackWithTimeout]);
+
+  const handleOpenControl = useCallback(() => setActiveTab('control'), []);
+  const handleOpenDev = useCallback(() => {
+    setActiveTab('dev');
+    setDevBadge(prev => ({ ...prev, newCount: 0 }));
+    if (window.vscode) {
+      window.vscode.postMessage({ type: 'requestSuggestions' });
+      window.vscode.postMessage({ type: 'requestAdHocActions' });
+    }
+  }, []);
+  const handleOpenInsights = useCallback(() => setActiveTab('insights'), []);
+  const handleOpenAbout = useCallback(() => setActiveTab('about'), []);
+
+  const handleInsightsKPIs = useCallback(() => setInsightsSubTab('kpis'), []);
+  const handleInsightsPatterns = useCallback(() => {
+    setInsightsSubTab('patterns');
+    if (window.vscode) {
+      window.vscode.postMessage({ type: 'requestPatterns' });
+        }
+  }, []);
 
 
   return (
@@ -596,7 +315,7 @@ export default function App() {
         {/* Tabs: Control / Dev / Insights / About */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
           <button
-            onClick={() => setActiveTab('control')}
+            onClick={handleOpenControl}
             className={`tab-button ${activeTab === 'control' ? 'active' : ''}`}
             style={{
               padding: '6px 10px',
@@ -611,16 +330,7 @@ export default function App() {
             🛠️ Control
           </button>
           <button
-            onClick={() => {
-              setActiveTab('dev');
-              // acknowledge new items when opening
-              setDevBadge(prev => ({ ...prev, newCount: 0 }));
-              // Request suggestions and ad-hoc actions when Dev tab opens
-              if (window.vscode) {
-                window.vscode.postMessage({ type: 'requestSuggestions' });
-                window.vscode.postMessage({ type: 'requestAdHocActions' });
-              }
-            }}
+            onClick={handleOpenDev}
             className={`tab-button ${activeTab === 'dev' ? 'active' : ''}`}
             style={{
               padding: '6px 10px',
@@ -652,7 +362,7 @@ export default function App() {
             )}
           </button>
           <button
-            onClick={() => setActiveTab('insights')}
+            onClick={handleOpenInsights}
             className={`tab-button ${activeTab === 'insights' ? 'active' : ''}`}
             style={{
               padding: '6px 10px',
@@ -667,7 +377,7 @@ export default function App() {
             📊 Insights
           </button>
           <button
-            onClick={() => setActiveTab('about')}
+            onClick={handleOpenAbout}
             className={`tab-button ${activeTab === 'about' ? 'active' : ''}`}
             style={{
               padding: '6px 10px',
@@ -1176,8 +886,7 @@ export default function App() {
                             <button
                               onClick={() => {
                                 // TODO: Implement create task from ad-hoc action
-                                setFeedback('💡 Create task feature coming soon!');
-                                setTimeout(() => setFeedback(null), 2000);
+                                setFeedbackWithTimeout('💡 Create task feature coming soon!', 2000); // ✅ FIX #2: Cleaned timer
                               }}
                               className="dev-button-success-small"
                             >
@@ -1187,8 +896,7 @@ export default function App() {
                               onClick={() => {
                                 // Remove from list
                                 setAdHocActions(prev => prev.filter((_, i) => i !== index));
-                                setFeedback('🗑️ Action ignored');
-                                setTimeout(() => setFeedback(null), 1500);
+                                setFeedbackWithTimeout('🗑️ Action ignored', 1500); // ✅ FIX #2: Cleaned timer
                               }}
                               className="dev-button-danger-small"
                             >
@@ -1395,7 +1103,7 @@ export default function App() {
             {/* Insights Sub-Tabs */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: '1px solid var(--vscode-panel-border)', paddingBottom: '8px' }}>
               <button
-                onClick={() => setInsightsSubTab('kpis')}
+                onClick={handleInsightsKPIs}
                 style={{
                   padding: '8px 16px',
                   background: insightsSubTab === 'kpis' ? 'var(--vscode-button-background)' : 'transparent',
@@ -1410,13 +1118,7 @@ export default function App() {
                 📊 KPIs
               </button>
               <button
-                onClick={() => {
-                  setInsightsSubTab('patterns');
-                  // Request patterns from extension
-                  if (window.vscode) {
-                    window.vscode.postMessage({ type: 'requestPatterns' });
-                  }
-                }}
+                onClick={handleInsightsPatterns}
                 style={{
                   padding: '8px 16px',
                   background: insightsSubTab === 'patterns' ? 'var(--vscode-button-background)' : 'transparent',

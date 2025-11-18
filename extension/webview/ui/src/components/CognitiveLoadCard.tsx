@@ -23,10 +23,10 @@ export const CognitiveLoadCard: React.FC<CognitiveLoadProps> = ({
 }) => {
   const getLevelColor = () => {
     switch (level) {
-      case 'critical': return '#ff4d4d';
-      case 'high': return '#ff9500';
-      case 'normal': return '#00c864';
-      default: return '#667eea';
+      case 'critical': return 'var(--vscode-inputValidation-errorBorder)';
+      case 'high': return 'var(--vscode-inputValidation-warningBorder)';
+      case 'normal': return 'var(--vscode-inputValidation-infoBorder)';
+      default: return 'var(--vscode-foreground)';
     }
   };
 
@@ -84,7 +84,7 @@ export const CognitiveLoadCard: React.FC<CognitiveLoadProps> = ({
         <div className="metric-item">
           <span className="metric-label">Uncommitted Files:</span>
           <span className="metric-value" style={{ 
-            color: metrics.uncommittedFiles > 15 ? '#ff4d4d' : 'inherit' 
+            color: metrics.uncommittedFiles > 15 ? 'var(--vscode-inputValidation-errorBorder)' : 'inherit' 
           }}>
             {metrics.uncommittedFiles}
           </span>

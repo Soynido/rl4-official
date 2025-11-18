@@ -95,26 +95,51 @@ export class PromptOptimizer {
   }
 
   /**
-   * Optimiser le prompt selon le mode
+   * Optimiser le prompt selon le mode (REFACTORED - Strategies Pattern)
    */
   async optimize(prompt: string, mode: CompressionMode): Promise<string> {
-    const analysis = this.analyzePrompt(prompt);
-    
-    // Stratégies par mode
-    switch (mode) {
-      case 'strict':
-        return this.optimizeStrict(prompt, analysis);
-      case 'flexible':
-        return this.optimizeFlexible(prompt, analysis);
-      case 'exploratory':
-        return this.optimizeExploratory(prompt, analysis);
-      case 'free':
-        return this.optimizeFree(prompt, analysis);
-      case 'firstUse':
-        return prompt; // Pas de compression pour firstUse (besoin de tout)
-      default:
-        return this.optimizeFlexible(prompt, analysis);
-    }
+    const strategy = this.strategies[mode];
+    return strategy(prompt);
+  }
+
+  /**
+   * Compression strategies (RL4 Snapshot System)
+   */
+  private strategies: Record<CompressionMode, (prompt: string) => string> = {
+    strict: this.compressAggressive.bind(this),
+    flexible: this.compressModerate.bind(this),
+    exploratory: this.compressMinimal.bind(this),
+    free: this.compressNone.bind(this),
+    firstUse: this.compressMinimal.bind(this)
+  };
+
+  /**
+   * Aggressive compression (strict mode)
+   */
+  private compressAggressive(prompt: string): string {
+    return this.optimizeStrict(prompt, this.analyzePrompt(prompt));
+  }
+
+  /**
+   * Moderate compression (flexible mode)
+   */
+  private compressModerate(prompt: string): string {
+    return this.optimizeFlexible(prompt, this.analyzePrompt(prompt));
+  }
+
+  /**
+   * Minimal compression (exploratory/firstUse mode)
+   */
+  private compressMinimal(prompt: string): string {
+    return this.optimizeExploratory(prompt, this.analyzePrompt(prompt));
+  }
+
+  /**
+   * No compression (free mode)
+   */
+  private compressNone(prompt: string): string {
+    // Just remove obvious redundancy, no section removal
+    return this.removeObviousRedundancy(prompt);
   }
 
   /**

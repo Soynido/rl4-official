@@ -18,6 +18,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { PlanTasksContextParser, PlanData, TasksData, ContextData, WorkspaceData } from './PlanTasksContextParser';
 import { BlindSpotDataLoader, TimelinePeriod } from './BlindSpotDataLoader';
 import { ADRParser } from './ADRParser';
@@ -31,6 +32,69 @@ import { AnomalyDetector, WorkspaceContext } from './AnomalyDetector';
 import { CognitiveLogger, SnapshotDataSummary, LLMAnalysisMetrics, Insight } from '../CognitiveLogger';
 import { CodeStateAnalyzer, CodeState } from './CodeStateAnalyzer';
 import { AdHocTracker, AdHocAction } from '../cognitive/AdHocTracker';
+import { ActivityReconstructor, ActivitySummary } from './ActivityReconstructor'; // ✅ P2: Activity reconstruction
+
+// ============================================================================
+// RL4 SNAPSHOT SYSTEM - Interfaces and Types
+// ============================================================================
+
+interface SnapshotData {
+  plan: PlanData | null;
+  tasks: TasksData | null;
+  context: ContextData | null;
+  adrs: any[];
+  historySummary: HistorySummary | null;
+  biasReport: BiasReport;
+  confidence: number;
+  bias: number;
+  timeline: any[];
+  filePatterns: any;
+  gitHistory: any[];
+  healthTrends: any[];
+  enrichedCommits: EnrichedCommit[];
+  adHocActions: AdHocAction[];
+  enginePatterns: any[];
+  engineCorrelations: any[];
+  engineForecasts: any[];
+  anomalies: any[];
+  projectContext: ProjectContext;
+  detectedProject?: { name: string; description?: string; structure?: string };
+  codeState: CodeState;
+  bootstrap: any | null;
+  generated: string;
+  deviationMode: 'strict' | 'flexible' | 'exploratory' | 'free' | 'firstUse';
+  generatedTimestamp: Date;
+  metadata: SnapshotMetadata;
+}
+
+interface SnapshotMetadata {
+  kernelCycle: number;
+  merkleRoot: string;
+  kernelFlags: { safeMode: boolean; ready: boolean };
+  deviationMode: string;
+  compressionRatio: number;
+  dataHashes: { plan: string | null; tasks: string | null; context: string | null; ledger: string | null };
+  anomalies: any[];
+  compression: { originalSize: number; optimizedSize: number; reductionPercent: number; mode: string };
+}
+
+interface PromptProfile {
+  mode: 'strict' | 'flexible' | 'exploratory' | 'free' | 'firstUse';
+  includeTasks: { P0: boolean; P1: boolean; P2: boolean; completed: boolean };
+  sections: {
+    plan: boolean;
+    tasks: boolean;
+    context: 'minimal' | 'rich' | 'complete';
+    timeline: false | 'condensed' | 'complete' | 'extended';
+    blindSpot: false | 'selective' | 'complete' | 'extended';
+    engineData: 'minimal' | 'complete';
+    anomalies: 'critical' | 'medium,critical' | 'all';
+    historySummary: boolean;
+    bootstrap: boolean;
+  };
+  compression: 'aggressive' | 'moderate' | 'minimal' | 'none';
+  rules: { threshold: number; suppressRedundancy: boolean; focusP0: boolean };
+}
 
 export class UnifiedPromptBuilder {
   private rl4Path: string;
@@ -65,6 +129,98 @@ export class UnifiedPromptBuilder {
     this.adHocTracker = new AdHocTracker(this.workspaceRoot);
   }
 
+  // ============================================================================
+  // RL4 SNAPSHOT SYSTEM - Profile Configurations
+  // ============================================================================
+
+  private readonly profiles: Record<string, PromptProfile> = {
+    strict: {
+      mode: 'strict',
+      includeTasks: { P0: true, P1: false, P2: false, completed: false },
+      sections: {
+        plan: true,
+        tasks: true,
+        context: 'minimal',
+        timeline: false,
+        blindSpot: false,
+        engineData: 'minimal',
+        anomalies: 'critical',
+        historySummary: false,
+        bootstrap: false
+      },
+      compression: 'aggressive',
+      rules: { threshold: 0.0, suppressRedundancy: true, focusP0: true }
+    },
+    flexible: {
+      mode: 'flexible',
+      includeTasks: { P0: true, P1: true, P2: false, completed: false },
+      sections: {
+        plan: true,
+        tasks: true,
+        context: 'rich',
+        timeline: 'condensed',
+        blindSpot: 'selective',
+        engineData: 'complete',
+        anomalies: 'medium,critical',
+        historySummary: false,
+        bootstrap: false
+      },
+      compression: 'moderate',
+      rules: { threshold: 0.25, suppressRedundancy: true, focusP0: false }
+    },
+    exploratory: {
+      mode: 'exploratory',
+      includeTasks: { P0: true, P1: true, P2: true, completed: false },
+      sections: {
+        plan: true,
+        tasks: true,
+        context: 'complete',
+        timeline: 'complete',
+        blindSpot: 'complete',
+        engineData: 'complete',
+        anomalies: 'all',
+        historySummary: false,
+        bootstrap: false
+      },
+      compression: 'minimal',
+      rules: { threshold: 0.50, suppressRedundancy: false, focusP0: false }
+    },
+    free: {
+      mode: 'free',
+      includeTasks: { P0: true, P1: true, P2: true, completed: true },
+      sections: {
+        plan: true,
+        tasks: true,
+        context: 'complete',
+        timeline: 'extended',
+        blindSpot: 'extended',
+        engineData: 'complete',
+        anomalies: 'all',
+        historySummary: true,
+        bootstrap: false
+      },
+      compression: 'none',
+      rules: { threshold: 1.0, suppressRedundancy: false, focusP0: false }
+    },
+    firstUse: {
+      mode: 'firstUse',
+      includeTasks: { P0: true, P1: true, P2: true, completed: false },
+      sections: {
+        plan: true,
+        tasks: true,
+        context: 'complete',
+        timeline: 'complete',
+        blindSpot: 'complete',
+        engineData: 'complete',
+        anomalies: 'all',
+        historySummary: false,
+        bootstrap: true
+      },
+      compression: 'minimal',
+      rules: { threshold: 0.50, suppressRedundancy: false, focusP0: false }
+    }
+  };
+
   /**
    * Generate unified context snapshot with user-selected deviation mode
    * @param deviationMode - User's perception angle (strict/flexible/exploratory/free/firstUse)
@@ -72,20 +228,10 @@ export class UnifiedPromptBuilder {
    */
   async generate(deviationMode: 'strict' | 'flexible' | 'exploratory' | 'free' | 'firstUse' = 'flexible'): Promise<{
     prompt: string;
-    metadata: {
-      anomalies: any[];
-      compression: {
-        originalSize: number;
-        optimizedSize: number;
-        reductionPercent: number;
-        mode: string;
-      };
-    };
+    metadata: SnapshotMetadata;
   }> {
     try {
     const now = new Date();
-    const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
-    const period: TimelinePeriod = { from: twoHoursAgo, to: now };
     
     // Phase 5: Log snapshot generation start
     if (this.cognitiveLogger) {
@@ -102,188 +248,27 @@ export class UnifiedPromptBuilder {
       this.cognitiveLogger.logSnapshotStart(deviationMode, dataSummary);
     }
 
-    // Load persistent state files
-    const plan = this.planParser.parsePlan();
-    const tasks = this.planParser.parseTasks();
-    const context = this.planParser.parseContext();
-
-    // Load compressed historical summary (30 days → 2KB JSON)
-    const historySummary = await this.historySummarizer.summarize(30);
-
-    // If firstUse mode, run bootstrap first
-    if (deviationMode === 'firstUse') {
-      const { FirstBootstrapEngine } = await import('../bootstrap/FirstBootstrapEngine');
-      const bootstrapEngine = new FirstBootstrapEngine(this.workspaceRoot);
-      await bootstrapEngine.bootstrap();
-    }
-
-    // Calculate bias (deviation from original plan) with user-selected mode
-    const biasMode = deviationMode === 'firstUse' ? 'exploratory' : deviationMode;
-    const biasReport = await this.biasCalculator.calculateBias(biasMode);
-
-    // Enrich commits with ADR detection signals (last 24h)
-    const enrichedCommits = await this.adrEnricher.enrichCommits(24);
-
-    // Analyze project context (for Exploratory/Free modes)
-    const projectContext = await this.projectAnalyzer.analyze();
+    // PHASE 0: Build SnapshotData (agrège et normalise toutes les données)
+    const snapshotData = await this.buildSnapshotData(deviationMode);
     
-    // Detect project name from workspace (GENERIC, not RL4-specific)
-    const projectDetector = new ProjectDetector(this.workspaceRoot);
-    const detectedProject = await projectDetector.detect();
-
-    // Analyze actual code state (what's really implemented)
-    // Extract goals from plan (goal field) or tasks
-    const goalText = plan?.goal || '';
-    const taskTexts = tasks?.active.map(t => t.task) || [];
-    const goals = goalText ? [goalText, ...taskTexts] : taskTexts;
-    const codeState = await this.codeStateAnalyzer.analyze(goals);
-
-    // Load blind spot data (recent activity only)
-    const timeline = this.blindSpotLoader.loadTimeline(period);
-    const filePatterns = this.blindSpotLoader.loadFilePatterns(period);
-    const gitHistory = this.blindSpotLoader.loadGitHistory(10);
-    const healthTrends = this.blindSpotLoader.loadHealthTrends(period);
-    const adrs = this.blindSpotLoader.loadADRs(5);
-
-    // Detect ad-hoc actions (unplanned tasks)
-    const adHocActions = this.adHocTracker.detectAdHocActions(120); // Last 2 hours
-
-    // Load engine-generated data (patterns, correlations, forecasts) for LLM optimization
-    const enginePatterns = this.loadEnginePatterns();
-    const engineCorrelations = this.loadEngineCorrelations();
-    const engineForecasts = this.loadEngineForecasts();
-
-    // Get workspace reality for confidence calculation
-    const workspaceReality: WorkspaceData = {
-      activeFiles: context?.activeFiles || [],
-      recentCycles: timeline.length,
-      recentCommits: gitHistory.length,
-      health: {
-        memoryMB: healthTrends[healthTrends.length - 1]?.memoryMB || 0,
-        eventLoopLag: healthTrends[healthTrends.length - 1]?.eventLoopLagP50 || 0
-      }
-    };
-
-    // Calculate metrics
-    const confidence = plan ? this.planParser.calculateConfidence(plan, workspaceReality) : 0.5;
-    const bias = biasReport.total;
+    // PHASE 1: Format prompt selon profile
+    const profile = this.profiles[deviationMode];
+    let prompt = await this.formatPrompt(snapshotData, profile);
     
-    // Phase 5: Log data aggregation (after loading all data)
-    if (this.cognitiveLogger) {
-      const dataSummary: SnapshotDataSummary = {
-        mode: deviationMode,
-        total_cycles: timeline.length,
-        recent_commits: gitHistory.length,
-        file_changes: filePatterns ? Object.keys(filePatterns).length : 0, // Count unique file patterns
-        plan_rl4_found: plan !== null,
-        tasks_rl4_found: tasks !== null,
-        context_rl4_found: context !== null,
-        adrs_count: adrs.length
-      };
-      this.cognitiveLogger.logDataAggregation(dataSummary);
-    }
-    
-    // Phase 5: Log insights (after calculating metrics)
-    if (this.cognitiveLogger) {
-      const insights: Insight[] = [];
-      
-      // Insight: Confidence level
-      if (confidence < 0.5) {
-        insights.push({
-          type: 'alert',
-          message: `Low confidence (${(confidence * 100).toFixed(0)}%) - Consider generating more context or updating Plan.RL4`,
-          priority: 'medium'
-        });
-      } else if (confidence > 0.8) {
-        insights.push({
-          type: 'inference',
-          message: `High confidence (${(confidence * 100).toFixed(0)}%) - System has good understanding of project state`,
-          priority: 'low'
-        });
-      }
-      
-      // Insight: Bias level
-      if (bias > 0.5) {
-        insights.push({
-          type: 'pattern',
-          message: `Significant deviation from plan (bias: ${(bias * 100).toFixed(0)}%) - Project may have evolved beyond original plan`,
-          priority: 'medium'
-        });
-      }
-      
-      // Insight: Missing RL4 files
-      if (!plan || !tasks || !context) {
-        insights.push({
-          type: 'suggestion',
-          message: `Missing RL4 files - Consider initializing Plan.RL4, Tasks.RL4, and Context.RL4 for better context`,
-          priority: 'high'
-        });
-      }
-      
-      if (insights.length > 0) {
-        this.cognitiveLogger.logInsights(insights);
-      }
-    }
-
-    // Detect anomalies before building prompt
-    const workspaceContext: WorkspaceContext = {
-      recentCommits: gitHistory.length,
-      fileChanges: filePatterns ? Object.keys(filePatterns).length : 0,
-      patterns: enginePatterns,
-      forecasts: engineForecasts,
-      correlations: engineCorrelations,
-      adrs: adrs,
-      cycles: timeline.length,
-      health: {
-        memoryMB: healthTrends[healthTrends.length - 1]?.memoryMB || 0,
-        eventLoopLag: healthTrends[healthTrends.length - 1]?.eventLoopLagP50 || 0
-      },
-      bias: bias,
-      planDrift: biasReport.total,
-      cognitiveLoad: 0 // Will be calculated by LLM
-    };
-    
-    const anomalies = await this.anomalyDetector.detectAnomalies(workspaceContext);
-
-    // Build prompt with user-selected deviation mode
-    let prompt = this.formatPrompt({
-      plan,
-      tasks,
-      context,
-      adrs,
-      historySummary,
-      biasReport,
-      enrichedCommits,
-      adHocActions,  // Ad-hoc actions (unplanned tasks)
-      timeline,
-      filePatterns,
-      gitHistory,
-      healthTrends,
-      confidence,
-      bias,
-      generated: now.toISOString(),
-      deviationMode,  // User choice from UI
-      projectContext,  // Project analysis for intelligent modes
-      detectedProject,  // Detected project name/context
-      codeState,  // Actual code implementation state
-      enginePatterns,  // Patterns from PatternLearningEngine (preliminary)
-      engineCorrelations,  // Correlations from CorrelationEngine (preliminary)
-      engineForecasts,  // Forecasts from ForecastEngine (preliminary)
-      anomalies,  // Anomalies detected
-      generatedTimestamp: now  // Timestamp for chat memory context
-    });
-    
-    // Store original size before optimization
+    // PHASE 2: Optimize/compress selon profile
     const originalSize = prompt.length;
-    
-    // Optimize prompt (compress intelligently)
     prompt = await this.promptOptimizer.optimize(prompt, deviationMode);
-    
-    // Calculate compression metrics
     const optimizedSize = prompt.length;
-    const reductionPercent = originalSize > 0 
-      ? ((originalSize - optimizedSize) / originalSize) * 100 
-      : 0;
+    const compressionRatio = originalSize > 0 ? (originalSize - optimizedSize) / originalSize : 0;
+    
+    // PHASE 3: Update metadata avec compression
+    snapshotData.metadata.compressionRatio = compressionRatio;
+    snapshotData.metadata.compression = {
+      originalSize,
+      optimizedSize,
+      reductionPercent: compressionRatio * 100,
+      mode: deviationMode
+    };
     
     // Phase 5: Log snapshot generated (after prompt generation and optimization)
     if (this.cognitiveLogger) {
@@ -292,19 +277,12 @@ export class UnifiedPromptBuilder {
       this.cognitiveLogger.logSnapshotGenerated(prompt.length, sections);
     }
     
-    // Return prompt with metadata
+    // Return prompt with enriched metadata
     return {
       prompt,
-      metadata: {
-        anomalies: anomalies || [],
-        compression: {
-          originalSize,
-          optimizedSize,
-          reductionPercent,
-          mode: deviationMode
-        }
-      }
+      metadata: snapshotData.metadata
     };
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
@@ -328,9 +306,91 @@ export class UnifiedPromptBuilder {
   }
 
   /**
-   * Format unified prompt
+   * Format unified prompt (REFACTORED - RL4 Snapshot System)
+   * Order of sections is STRICTLY IMPOSED and IDENTICAL for all 5 modes
    */
-  private formatPrompt(data: {
+  private async formatPrompt(data: SnapshotData, profile: PromptProfile): Promise<string> {
+    // BEGIN RL4 SNAPSHOT
+    let prompt = `BEGIN RL4 SNAPSHOT\n\n`;
+    
+    // HEADER (with metadata, minimap, boundaries)
+    prompt += this.buildHeader(data, profile);
+    
+    // CRITICAL RULES (always first)
+    prompt += this.buildCriticalRules(data, profile);
+    
+    // ✅ P0-FIRSTUSE-OPTIMIZATION: PROJECT CONTEXT DISCOVERY for firstUse mode
+    if (profile.mode === 'firstUse') {
+      prompt += this.buildProjectContextDiscovery(data);
+    }
+    
+    // CHAT MEMORY (always second)
+    prompt += this.buildChatMemory(data);
+    
+    // PLAN (if profile allows)
+    if (profile.sections.plan && data.plan) {
+      prompt += this.buildPlan(data.plan);
+    }
+    
+    // TASKS (if profile allows, filtered by profile.includeTasks)
+    if (profile.sections.tasks && data.tasks) {
+      prompt += this.buildTasks(data.tasks, profile);
+    }
+    
+    // CONTEXT (if profile allows, level according to profile.sections.context)
+    if (profile.sections.context && data.context) {
+      prompt += this.buildContext(data.context, profile.sections.context, data);
+    }
+    
+    // ✅ P2: ACTIVITY RECONSTRUCTION (if not firstUse and last snapshot exists)
+    if (profile.mode !== 'firstUse') {
+      const activitySection = await this.buildActivityReconstruction(data);
+      if (activitySection) {
+        prompt += activitySection;
+      }
+    }
+    
+    // BOOTSTRAP (firstUse only)
+    if (profile.sections.bootstrap && data.bootstrap) {
+      prompt += this.buildBootstrapSection(data.bootstrap);
+    }
+    
+    // TIMELINE + BLINDSPOT (if profile allows)
+    if (profile.sections.timeline !== false) {
+      prompt += this.buildTimelineAndBlindSpot(data, profile);
+    }
+    
+    // HISTORY SUMMARY (free only)
+    if (profile.sections.historySummary && data.historySummary) {
+      prompt += this.buildHistorySummary(data.historySummary);
+    }
+    
+    // ENGINE DATA (if profile allows)
+    if (profile.sections.engineData !== 'minimal' || (data.enginePatterns.length > 0 || data.engineCorrelations.length > 0 || data.engineForecasts.length > 0)) {
+      prompt += this.buildEngineData(data, profile.sections.engineData);
+    }
+    
+    // ANOMALIES (if profile allows, filtered by profile.sections.anomalies)
+    if (profile.sections.anomalies !== 'critical' || data.anomalies.length > 0) {
+      prompt += this.buildAnomalies(data.anomalies, profile.sections.anomalies);
+    }
+    
+    // AGENT INSTRUCTIONS (always last)
+    prompt += this.buildAgentInstructions(data, profile);
+    
+    // END RL4 SNAPSHOT
+    prompt += `\nEND RL4 SNAPSHOT\n`;
+    
+    // Enforce size limits
+    prompt = this.enforceSizeLimits(prompt, profile);
+    
+    return prompt;
+  }
+
+  /**
+   * OLD formatPrompt - DEPRECATED (kept for reference, will be removed)
+   */
+  private formatPrompt_OLD(data: {
     plan: PlanData | null;
     tasks: TasksData | null;
     context: ContextData | null;
@@ -1198,15 +1258,25 @@ export class UnifiedPromptBuilder {
     prompt += `   [UPDATED_TASKS_CONTENT]\n`;
     prompt += `   \`\`\`\n\n`;
     
-    prompt += `   **Context.RL4** (update workspace state + KPIs):\n`;
-    prompt += `   \`\`\`markdown\n`;
-    prompt += `   ---\n`;
-    prompt += `   version: ${(parseFloat(data.context?.version || '1.0.0') + 0.1).toFixed(1)}\n`;
-    prompt += `   updated: ${new Date().toISOString()}\n`;
-    prompt += `   confidence: [YOUR_CALCULATED_CONFIDENCE]\n`;
-    prompt += `   ---\n\n`;
-    prompt += `   # RL4 Operational Context\n\n`;
-    prompt += `   ## KPIs (LLM-Calculated)\n\n`;
+    prompt += `      **Context.RL4** (update workspace state + KPIs):\n`;
+   prompt += `   \`\`\`markdown\n`;
+   prompt += `   ---\n`;
+   prompt += `   version: ${(parseFloat(data.context?.version || '1.0.0') + 0.1).toFixed(1)}\n`;
+   prompt += `   updated: ${new Date().toISOString()}\n`;
+   prompt += `   confidence: [YOUR_CALCULATED_CONFIDENCE]\n`;
+   prompt += `   kpis_llm:\n`;
+   prompt += `     - cycle: [CYCLE_NUMBER]\n`;
+   prompt += `       cognitive_load: [XX]\n`;
+   prompt += `       risks: [...]\n`;
+   prompt += `       next_steps: [...]\n`;
+   prompt += `       plan_drift: [XX]\n`;
+   prompt += `       opportunities: [...]\n`;
+   prompt += `       updated: ${new Date().toISOString()}\n`;
+   prompt += `   kpis_kernel: []\n`;
+   prompt += `   ---\n\n`;
+   prompt += `   # RL4 Operational Context\n\n`;
+   prompt += `   ## KPIs LLM (High-Level Cognition)\n\n`;
+   prompt += `   **⚠️ IMPORTANT: Write ONLY in kpis_llm section. Kernel manages kpis_kernel automatically.**\n\n`;
     prompt += `   ### Cognitive Load: [XX]% ([Level])\n`;
     prompt += `   - Bursts: [N]\n`;
     prompt += `   - Switches: [N]\n`;
@@ -2155,6 +2225,1277 @@ export class UnifiedPromptBuilder {
     } catch (error) {
       console.warn('[UnifiedPromptBuilder] Failed to load forecasts:', error);
       return [];
+    }
+  }
+
+  // ============================================================================
+  // RL4 SNAPSHOT SYSTEM - SnapshotDataAssembler
+  // ============================================================================
+
+  /**
+   * Build complete SnapshotData by aggregating and normalizing all kernel data
+   */
+  private async buildSnapshotData(deviationMode: 'strict' | 'flexible' | 'exploratory' | 'free' | 'firstUse'): Promise<SnapshotData> {
+    const profile = this.profiles[deviationMode];
+    const now = new Date();
+    const safeDefaults = this.getSafeDefaults();
+
+    try {
+      // 1. Load persistent state files
+      const plan = this.normalizePlan(this.planParser.parsePlan());
+      const tasks = this.normalizeTasks(this.planParser.parseTasks());
+      const context = this.normalizeContext(this.planParser.parseContext());
+
+      // 2. Load compressed historical summary (if profile allows)
+      const historySummary = profile.sections.historySummary
+        ? await this.normalizeHistory(await this.historySummarizer.summarize(30))
+        : null;
+
+      // 3. Calculate bias and confidence
+      const biasMode = deviationMode === 'firstUse' ? 'exploratory' : deviationMode;
+      const biasReport = await this.biasCalculator.calculateBias(biasMode);
+      
+      // Get workspace reality for confidence calculation
+      const timelinePeriod = this.getTimelinePeriod(profile.sections.timeline);
+      const timeline = this.normalizeTimeline(this.blindSpotLoader.loadTimeline(timelinePeriod));
+      const gitHistory = this.normalizeGitHistory(this.blindSpotLoader.loadGitHistory(profile.sections.timeline === 'extended' ? 50 : 10));
+      const healthTrends = this.normalizeHealthTrends(this.blindSpotLoader.loadHealthTrends(timelinePeriod));
+      
+      const workspaceReality: WorkspaceData = {
+        activeFiles: context?.activeFiles || [],
+        recentCycles: timeline.length,
+        recentCommits: gitHistory.length,
+        health: {
+          memoryMB: healthTrends[healthTrends.length - 1]?.memoryMB || 0,
+          eventLoopLag: healthTrends[healthTrends.length - 1]?.eventLoopLagP50 || 0
+        }
+      };
+      
+      const confidence = plan ? this.planParser.calculateConfidence(plan, workspaceReality) : 0.5;
+      const bias = biasReport.total;
+
+      // 4. Load blind spot data (according to profile)
+      const filePatterns = this.normalizeFilePatterns(this.blindSpotLoader.loadFilePatterns(timelinePeriod));
+      const adrs = this.normalizeADRs(this.blindSpotLoader.loadADRs(5));
+
+      // 5. Enrich commits with ADR detection signals
+      const enrichedCommits = this.normalizeEnrichedCommits(await this.adrEnricher.enrichCommits(24));
+
+      // 6. Detect ad-hoc actions
+      const adHocActions = this.normalizeAdHocActions(this.adHocTracker.detectAdHocActions(120));
+
+      // 7. Load engine-generated data
+      const enginePatterns = this.normalizePatterns(this.loadEnginePatterns());
+      const engineCorrelations = this.normalizeCorrelations(this.loadEngineCorrelations());
+      const engineForecasts = this.normalizeForecasts(this.loadEngineForecasts());
+
+      // 8. Analyze project context
+      const projectContext = await this.projectAnalyzer.analyze();
+      const projectDetector = new ProjectDetector(this.workspaceRoot);
+      const detectedProject = await projectDetector.detect();
+
+      // 9. Analyze code state
+      const goalText = plan?.goal || '';
+      const taskTexts = tasks?.active.map(t => t.task) || [];
+      const goals = goalText ? [goalText, ...taskTexts] : taskTexts;
+      const codeState = await this.codeStateAnalyzer.analyze(goals);
+
+      // 10. Detect anomalies
+      const workspaceContext: WorkspaceContext = {
+        recentCommits: gitHistory.length,
+        fileChanges: filePatterns ? Object.keys(filePatterns).length : 0,
+        patterns: enginePatterns,
+        forecasts: engineForecasts,
+        correlations: engineCorrelations,
+        adrs: adrs,
+        cycles: timeline.length,
+        health: {
+          memoryMB: healthTrends[healthTrends.length - 1]?.memoryMB || 0,
+          eventLoopLag: healthTrends[healthTrends.length - 1]?.eventLoopLagP50 || 0
+        },
+        bias: bias,
+        planDrift: biasReport.total,
+        cognitiveLoad: 0
+      };
+      
+      const anomalies = this.normalizeAnomalies(
+        await this.anomalyDetector.detectAnomalies(workspaceContext),
+        profile.sections.anomalies
+      );
+
+      // 11. Load bootstrap (firstUse only, READ-ONLY)
+      const bootstrap = profile.sections.bootstrap
+        ? this.normalizeBootstrap(this.loadBootstrapJSON())
+        : null;
+
+      // 12. Build metadata
+      const metadata = await this.buildMetadata(deviationMode, plan, tasks, context, anomalies);
+
+      // 13. Assemble SnapshotData
+      return {
+        plan,
+        tasks,
+        context,
+        adrs,
+        historySummary,
+        biasReport,
+        confidence,
+        bias,
+        timeline,
+        filePatterns,
+        gitHistory,
+        healthTrends,
+        enrichedCommits,
+        adHocActions,
+        enginePatterns,
+        engineCorrelations,
+        engineForecasts,
+        anomalies,
+        projectContext,
+        detectedProject,
+        codeState,
+        bootstrap,
+        generated: now.toISOString(),
+        deviationMode,
+        generatedTimestamp: now,
+        metadata
+      };
+
+    } catch (error) {
+      console.error('[UnifiedPromptBuilder] Error building snapshot data:', error);
+      return safeDefaults;
+    }
+  }
+
+  /**
+   * Get safe defaults for SnapshotData in case of errors
+   */
+  private getSafeDefaults(): SnapshotData {
+    const now = new Date();
+    return {
+      plan: null,
+      tasks: null,
+      context: null,
+      adrs: [],
+      historySummary: null,
+      biasReport: { total: 0, breakdown: { phase: 0, goal: 0, timeline: 0, criteria: 0 }, exceeds_threshold: false, deviation_mode: 'flexible', threshold: 0.25, recommendations: [], drift_areas: [] },
+      confidence: 0.5,
+      bias: 0,
+      timeline: [],
+      filePatterns: {},
+      gitHistory: [],
+      healthTrends: [],
+      enrichedCommits: [],
+      adHocActions: [],
+      enginePatterns: [],
+      engineCorrelations: [],
+      engineForecasts: [],
+      anomalies: [],
+      projectContext: { maturity: 'new', projectType: 'generic', stackDetected: [], totalCycles: 0, projectAge: 0, qualityScore: 0, hasTests: false, hasLinter: false, hasCI: false, topHotspots: [], hotspotCount: 0, burstCount: 0 },
+      detectedProject: undefined,
+      codeState: { keyFiles: [], implementationStatus: [], techStack: { languages: [], frameworks: [], dependencies: [] }, structure: { entryPoints: [], mainModules: [] } },
+      bootstrap: null,
+      generated: now.toISOString(),
+      deviationMode: 'flexible',
+      generatedTimestamp: now,
+      metadata: {
+        kernelCycle: 0,
+        merkleRoot: '',
+        kernelFlags: { safeMode: false, ready: false },
+        deviationMode: 'flexible',
+        compressionRatio: 0,
+        dataHashes: { plan: null, tasks: null, context: null, ledger: null },
+        anomalies: [],
+        compression: { originalSize: 0, optimizedSize: 0, reductionPercent: 0, mode: 'flexible' }
+      }
+    };
+  }
+
+  /**
+   * Build enriched metadata for snapshot
+   */
+  private async buildMetadata(
+    deviationMode: string,
+    plan: PlanData | null,
+    tasks: TasksData | null,
+    context: ContextData | null,
+    anomalies: any[]
+  ): Promise<SnapshotMetadata> {
+    // Read kernelCycle from cycles.jsonl
+    let kernelCycle = 0;
+    try {
+      const cyclesPath = path.join(this.rl4Path, 'ledger', 'cycles.jsonl');
+      if (fs.existsSync(cyclesPath)) {
+        const lines = fs.readFileSync(cyclesPath, 'utf-8').trim().split('\n').filter(Boolean);
+        if (lines.length > 0) {
+          const latestCycle = JSON.parse(lines[lines.length - 1]);
+          kernelCycle = latestCycle.cycleId || 0;
+        }
+      }
+    } catch (error) {
+      // Fallback to 0
+    }
+
+    // Read merkleRoot from ledger.jsonl
+    let merkleRoot = '';
+    try {
+      const ledgerPath = path.join(this.rl4Path, 'ledger', 'ledger.jsonl');
+      if (fs.existsSync(ledgerPath)) {
+        const lines = fs.readFileSync(ledgerPath, 'utf-8').trim().split('\n').filter(Boolean);
+        if (lines.length > 0) {
+          const lastEntry = JSON.parse(lines[lines.length - 1]);
+          merkleRoot = lastEntry.merkleRoot || '';
+        }
+      }
+    } catch (error) {
+      // Fallback to ''
+    }
+
+    // Calculate data hashes
+    const dataHashes = {
+      plan: plan ? this.calculateHash(JSON.stringify(plan)) : null,
+      tasks: tasks ? this.calculateHash(JSON.stringify(tasks)) : null,
+      context: context ? this.calculateHash(JSON.stringify(context)) : null,
+      ledger: merkleRoot ? this.calculateHash(merkleRoot) : null
+    };
+
+    return {
+      kernelCycle,
+      merkleRoot,
+      kernelFlags: { safeMode: false, ready: true }, // TODO: Read from kernel state if available
+      deviationMode,
+      compressionRatio: 0, // Will be updated after compression
+      dataHashes,
+      anomalies,
+      compression: { originalSize: 0, optimizedSize: 0, reductionPercent: 0, mode: deviationMode }
+    };
+  }
+
+  /**
+   * Get timeline period based on profile section configuration
+   */
+  private getTimelinePeriod(timelineConfig: false | 'condensed' | 'complete' | 'extended'): TimelinePeriod {
+    const now = new Date();
+    switch (timelineConfig) {
+      case 'extended':
+        return { from: new Date(now.getTime() - 24 * 60 * 60 * 1000), to: now }; // 24h
+      case 'complete':
+        return { from: new Date(now.getTime() - 2 * 60 * 60 * 1000), to: now }; // 2h
+      case 'condensed':
+        return { from: new Date(now.getTime() - 1 * 60 * 60 * 1000), to: now }; // 1h
+      case false:
+      default:
+        return { from: now, to: now }; // Empty
+    }
+  }
+
+  /**
+   * Load bootstrap.json (READ-ONLY, never execute FirstBootstrapEngine)
+   */
+  private loadBootstrapJSON(): any | null {
+    try {
+      const bootstrapPath = path.join(this.rl4Path, 'bootstrap.json');
+      if (!fs.existsSync(bootstrapPath)) {
+        return null;
+      }
+      const content = fs.readFileSync(bootstrapPath, 'utf-8');
+      return JSON.parse(content);
+    } catch (error) {
+      console.warn('[UnifiedPromptBuilder] Failed to load bootstrap.json:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate SHA-256 hash of a string
+   */
+  private calculateHash(data: string): string {
+    return crypto.createHash('sha256').update(data).digest('hex');
+  }
+
+  // ============================================================================
+  // RL4 SNAPSHOT SYSTEM - Normalization Methods
+  // ============================================================================
+
+  private normalizePlan(plan: PlanData | null): PlanData | null {
+    if (!plan) return null;
+    // Ensure all required fields exist
+    return {
+      version: plan.version || '1.0.0',
+      updated: plan.updated || new Date().toISOString(),
+      confidence: plan.confidence || 0.5,
+      phase: plan.phase || 'Unknown',
+      goal: plan.goal || '',
+      timeline: plan.timeline || { start: '', target: '' },
+      successCriteria: Array.isArray(plan.successCriteria) ? plan.successCriteria : [],
+      constraints: Array.isArray(plan.constraints) ? plan.constraints : []
+    };
+  }
+
+  private normalizeTasks(tasks: TasksData | null): TasksData | null {
+    if (!tasks) return null;
+    // Ensure all required fields exist and deduplicate
+    const seenIds = new Set<string>();
+    const active = Array.isArray(tasks.active) ? tasks.active.filter(t => {
+      const idMatch = t.task?.match(/@rl4:id=([^\s]+)/);
+      if (idMatch) {
+        const id = idMatch[1];
+        if (seenIds.has(id)) return false;
+        seenIds.add(id);
+      }
+      return true;
+    }) : [];
+    
+    return {
+      version: tasks.version || '1.0.0',
+      updated: tasks.updated || new Date().toISOString(),
+      bias: tasks.bias || 0,
+      active,
+      blockers: Array.isArray(tasks.blockers) ? tasks.blockers : [],
+      completed: Array.isArray(tasks.completed) ? tasks.completed : []
+    };
+  }
+
+  private normalizeContext(context: ContextData | null): ContextData | null {
+    if (!context) return null;
+    // Ensure all required fields exist
+    return {
+      version: context.version || '1.0.0',
+      updated: context.updated || new Date().toISOString(),
+      confidence: context.confidence || 0.5,
+      activeFiles: Array.isArray(context.activeFiles) ? context.activeFiles : [],
+      recentActivity: context.recentActivity || { cycles: 0, commits: 0, duration: '0h' },
+      health: context.health || { memory: '0MB', eventLoop: '0ms', uptime: '0h' },
+      observations: Array.isArray(context.observations) ? context.observations : []
+    };
+  }
+
+  private normalizeTimeline(timeline: any[]): any[] {
+    if (!Array.isArray(timeline)) return [];
+    // Sort by timestamp descending
+    return timeline.sort((a, b) => {
+      const timeA = new Date(a.timestamp || a.time || 0).getTime();
+      const timeB = new Date(b.timestamp || b.time || 0).getTime();
+      return timeB - timeA;
+    });
+  }
+
+  private normalizeFilePatterns(filePatterns: any): any {
+    return filePatterns && typeof filePatterns === 'object' ? filePatterns : {};
+  }
+
+  private normalizeGitHistory(gitHistory: any[]): any[] {
+    if (!Array.isArray(gitHistory)) return [];
+    // Ensure each commit has required fields
+    return gitHistory.map(c => ({
+      hash: c.hash || c.sha || 'unknown',
+      message: c.message || c.msg || '',
+      timestamp: c.timestamp || c.date || new Date().toISOString()
+    }));
+  }
+
+  private normalizeHealthTrends(healthTrends: any[]): any[] {
+    return Array.isArray(healthTrends) ? healthTrends : [];
+  }
+
+  private normalizePatterns(patterns: any[]): any[] {
+    if (!Array.isArray(patterns)) return [];
+    // Remove invalid patterns
+    return patterns.filter(p => p && (p.id || p.pattern || p.description));
+  }
+
+  private normalizeCorrelations(correlations: any[]): any[] {
+    if (!Array.isArray(correlations)) return [];
+    // Remove invalid correlations
+    return correlations.filter(c => c && (c.id || c.type || c.description));
+  }
+
+  private normalizeForecasts(forecasts: any[]): any[] {
+    if (!Array.isArray(forecasts)) return [];
+    // Remove invalid forecasts
+    return forecasts.filter(f => f && (f.id || f.predicted || f.forecast));
+  }
+
+  private normalizeAnomalies(anomalies: any[], filter: 'critical' | 'medium,critical' | 'all'): any[] {
+    if (!Array.isArray(anomalies)) return [];
+    // Filter by severity
+    const filtered = anomalies.filter(a => a && a.type && a.severity);
+    if (filter === 'all') return filtered;
+    if (filter === 'critical') return filtered.filter(a => a.severity === 'critical');
+    return filtered.filter(a => a.severity === 'critical' || a.severity === 'medium');
+  }
+
+  private normalizeADRs(adrs: any[]): any[] {
+    if (!Array.isArray(adrs)) return [];
+    // Ensure each ADR has required fields
+    return adrs.filter(a => a && (a.id || a.title));
+  }
+
+  private normalizeEnrichedCommits(commits: EnrichedCommit[]): EnrichedCommit[] {
+    return Array.isArray(commits) ? commits : [];
+  }
+
+  private normalizeAdHocActions(actions: AdHocAction[]): AdHocAction[] {
+    return Array.isArray(actions) ? actions : [];
+  }
+
+  private normalizeHistory(history: HistorySummary | null): HistorySummary | null {
+    return history;
+  }
+
+  private normalizeBootstrap(bootstrap: any | null): any | null {
+    if (!bootstrap) return null;
+    // Ensure bootstrap has expected structure
+    return {
+      structure: bootstrap.structure || {},
+      technologies: Array.isArray(bootstrap.technologies) ? bootstrap.technologies : [],
+      entryPoints: Array.isArray(bootstrap.entryPoints) ? bootstrap.entryPoints : [],
+      ...bootstrap
+    };
+  }
+
+  // ============================================================================
+  // RL4 SNAPSHOT SYSTEM - Build Methods (Header, Sections, etc.)
+  // ============================================================================
+
+  /**
+   * Build complete header with metadata, minimap, and boundaries
+   */
+  private buildHeader(data: SnapshotData, profile: PromptProfile): string {
+    const projectName = data.detectedProject?.name || 
+                        data.plan?.phase?.split(' ')[0] || 
+                        path.basename(this.rl4Path).replace('.reasoning_rl4', '');
+    
+    const uncommittedFiles = this.getUncommittedFilesCount();
+    
+    let header = `# 🧠 ${projectName} — RL4 Development Context Snapshot\n\n`;
+    header += `**Generated:** ${data.generated}\n`;
+    header += `**Mode:** ${profile.mode} (threshold: ${(profile.rules.threshold * 100).toFixed(0)}%)\n`;
+    header += `**Confidence:** ${(data.confidence * 100).toFixed(0)}% | **Bias:** ${(data.bias * 100).toFixed(0)}%\n`;
+    header += `**Kernel Cycle:** ${data.metadata.kernelCycle} | **Merkle Root:** ${data.metadata.merkleRoot.substring(0, 8)}...\n`;
+    header += `**Uncommitted Files:** ${uncommittedFiles}\n\n`;
+    
+    // Section Minimap
+    header += this.buildSectionMinimap(profile);
+    
+    header += `\n---\n\n`;
+    
+    return header;
+  }
+
+  /**
+   * Build section minimap (list of included sections)
+   */
+  private buildSectionMinimap(profile: PromptProfile): string {
+    const sections: string[] = [];
+    
+    if (profile.sections.plan) sections.push('plan');
+    if (profile.sections.tasks) {
+      const taskTypes: string[] = [];
+      if (profile.includeTasks.P0) taskTypes.push('P0');
+      if (profile.includeTasks.P1) taskTypes.push('P1');
+      if (profile.includeTasks.P2) taskTypes.push('P2');
+      if (profile.includeTasks.completed) taskTypes.push('completed');
+      sections.push(`tasks (${taskTypes.join(',')})`);
+    }
+    if (profile.sections.context) sections.push(`context (${profile.sections.context})`);
+    if (profile.sections.bootstrap) sections.push('bootstrap');
+    if (profile.sections.timeline !== false) sections.push(`timeline (${profile.sections.timeline})`);
+    if (profile.sections.blindSpot !== false) sections.push(`blindspot (${profile.sections.blindSpot})`);
+    if (profile.sections.historySummary) sections.push('history');
+    if (profile.sections.engineData !== 'minimal') sections.push('engine-data');
+    if (profile.sections.anomalies !== 'critical') sections.push(`anomalies (${profile.sections.anomalies})`);
+    sections.push('agent-instructions');
+    
+    return `**Sections included:** ${sections.join(' ✓ ')}\n`;
+  }
+
+  /**
+   * Get uncommitted files count from git status
+   */
+  private getUncommittedFilesCount(): number {
+    try {
+      const { execSync } = require('child_process');
+      const result = execSync('git status --porcelain', { cwd: this.workspaceRoot, encoding: 'utf-8' });
+      return result.trim().split('\n').filter((line: string) => line.trim().length > 0).length;
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  /**
+   * Build Critical Rules section
+   */
+  private buildCriticalRules(data: SnapshotData, profile: PromptProfile): string {
+    let rules = `## 🚨 CRITICAL RULES — READ THIS FIRST\n\n`;
+    rules += `**⚠️ BEFORE creating, modifying, or deleting ANY file:**\n\n`;
+    rules += `1. **READ \`.reasoning_rl4/Plan.RL4\`** → Check \`deviation_mode: ${profile.mode}\`\n`;
+    rules += `2. **READ \`.reasoning_rl4/Tasks.RL4\`** → List active P0 tasks\n`;
+    rules += `3. **READ \`.reasoning_rl4/Context.RL4\`** → Check current bias: ${(data.bias * 100).toFixed(0)}%\n`;
+    if (profile.mode === 'firstUse') {
+      rules += `4. **READ \`.reasoning_rl4/ADRs.RL4\`** → Review architectural decisions\n`;
+    }
+    rules += `\n`;
+    
+    if (profile.mode === 'strict') {
+      rules += `**🚫 STRICT MODE (0% threshold) — ZERO DEVIATION TOLERANCE**\n\n`;
+      rules += `- ❌ DO NOT create new files unless P0 task\n`;
+      rules += `- ❌ DO NOT modify files unless completing P0 task\n`;
+      rules += `- ✅ ONLY execute P0 tasks\n\n`;
+    } else if (profile.mode === 'flexible') {
+      rules += `**⚖️ FLEXIBLE MODE (25% threshold) — BALANCED APPROACH**\n\n`;
+      rules += `- ✅ P0 + P1 tasks allowed\n`;
+      rules += `- ⚠️ Small improvements OK if bias < 25%\n\n`;
+    } else if (profile.mode === 'exploratory') {
+      rules += `**🔍 EXPLORATORY MODE (50% threshold) — PROACTIVE INNOVATION**\n\n`;
+      rules += `- ✅ Explorations and improvements allowed\n`;
+      rules += `- ⚠️ Calculate bias impact before implementing\n\n`;
+    } else if (profile.mode === 'free') {
+      rules += `**🔥 FREE MODE (100% threshold) — NO RESTRICTIONS**\n\n`;
+      rules += `- ✅ Any modification allowed\n`;
+      rules += `- ⚠️ Always inform user of changes\n\n`;
+    }
+    
+    rules += `---\n\n`;
+    return rules;
+  }
+
+  /**
+   * Build Project Context Discovery section (firstUse only)
+   * ✅ P0-FIRSTUSE-OPTIMIZATION: Mandatory project context extraction
+   */
+  private buildProjectContextDiscovery(data: SnapshotData): string {
+    let section = `## 📚 PROJECT CONTEXT DISCOVERY — MANDATORY FIRST STEP\n\n`;
+    section += `**🎯 BEFORE analyzing RL4 files, YOU MUST extract project context from standard files:**\n\n`;
+    
+    section += `### Priority 1: Core Documentation (ALWAYS READ)\n`;
+    section += `- **\`README.md\`** (root) → Project description, domain, architecture, features\n`;
+    section += `- **\`package.json\`** (root + subprojects) → Project name, description, scripts, dependencies\n`;
+    section += `- **\`ADRs.RL4\`** → Existing architectural decisions and tech stack\n\n`;
+    
+    section += `### Priority 2: Configuration Files (READ IF EXISTS)\n`;
+    section += `- **\`tsconfig.json\`** / **\`jsconfig.json\`** → TypeScript/JavaScript configuration\n`;
+    section += `- **\`.gitignore\`** → Project structure insights\n`;
+    section += `- **\`docker-compose.yml\`** / **\`Dockerfile\`** → Deployment architecture\n`;
+    section += `- **\`.env.example\`** → Environment variables and services\n\n`;
+    
+    section += `### Priority 3: Code Structure (SCAN FOR CONTEXT)\n`;
+    section += `- **Entry points** (\`src/index.ts\`, \`App.tsx\`, etc.) → Application structure\n`;
+    section += `- **Models/Types** (\`models/\`, \`types/\`) → Domain entities and business logic\n`;
+    section += `- **Routes/Controllers** (\`routes/\`, \`controllers/\`) → Exposed functionalities\n\n`;
+    
+    section += `### Extraction Checklist:\n`;
+    section += `- [ ] Project name and domain (from README.md or package.json)\n`;
+    section += `- [ ] Project description and purpose (from README.md)\n`;
+    section += `- [ ] Tech stack (from package.json + ADRs.RL4)\n`;
+    section += `- [ ] Architecture (from README.md or structure)\n`;
+    section += `- [ ] Current features/status (from README.md or code)\n`;
+    section += `- [ ] MVP scope (from README.md or Plan.RL4)\n\n`;
+    
+    section += `**💡 Why?** RL4 files (Plan.RL4, Tasks.RL4, Context.RL4) are often generic and lack domain context. Standard project files contain the actual business context needed for meaningful updates.\n\n`;
+    section += `---\n\n`;
+    
+    return section;
+  }
+
+  /**
+   * Build Chat Memory section
+   */
+  private buildChatMemory(data: SnapshotData): string {
+    let memory = `## 💬 Chat Conversation Memory — PRIMARY CONTEXT SOURCE\n\n`;
+    memory += `**🎯 CRITICAL INSTRUCTION FOR LLM:**\n\n`;
+    memory += `Before reading ANY section below, **FIRST consult the chat conversation history** in your current context window.\n\n`;
+    memory += `**Why?** The chat contains:\n`;
+    memory += `- ✅ Real-time user intent (what the user wants RIGHT NOW)\n`;
+    memory += `- ✅ Recent decisions (what was just discussed and agreed)\n`;
+    memory += `- ✅ Corrections & clarifications (user feedback on your proposals)\n\n`;
+    memory += `**Prioritization Hierarchy:**\n`;
+    memory += `1. 🥇 Chat conversation (most recent, highest priority)\n`;
+    memory += `2. 🥈 Project context files (README.md, package.json, ADRs.RL4)\n`;
+    memory += `3. 🥉 Tasks.RL4 (active tasks, tactical TODOs)\n`;
+    memory += `4. 🥉 Plan.RL4 (strategic vision, long-term)\n`;
+    memory += `5. 📊 Snapshot data below (historical context, blind spots)\n\n`;
+    memory += `**💡 Key Insight:**\n`;
+    memory += `This snapshot was generated at **${data.generatedTimestamp.toISOString()}**. Any conversation AFTER this timestamp contains MORE RECENT context than the data below.\n\n`;
+    memory += `---\n\n`;
+    return memory;
+  }
+
+  /**
+   * Build Plan section
+   */
+  private buildPlan(plan: PlanData): string {
+    let section = `## 📋 Plan (Strategic Intent)\n\n`;
+    section += `**Phase:** ${plan.phase}\n\n`;
+    
+    // Format goal as list if it contains multiple lines
+    const goalLines = plan.goal.split('\n').filter(l => l.trim());
+    if (goalLines.length > 1) {
+      section += `**Goal:**\n`;
+      goalLines.forEach(g => {
+        section += `${g.trim().startsWith('-') ? g.trim() : `- ${g.trim()}`}\n`;
+      });
+      section += `\n`;
+    } else {
+      section += `**Goal:** ${plan.goal}\n\n`;
+    }
+    
+    section += `**Timeline:**\n`;
+    section += `- Start: ${plan.timeline.start}\n`;
+    section += `- Target: ${plan.timeline.target}\n`;
+    
+    // ✅ P0-FIRSTUSE-OPTIMIZATION: Add Current date and Days Remaining for firstUse
+    try {
+      const now = new Date();
+      const targetDate = new Date(plan.timeline.target);
+      const startDate = new Date(plan.timeline.start);
+      const currentDate = now.toISOString().split('T')[0];
+      const daysRemaining = Math.max(0, Math.ceil((targetDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+      
+      section += `- Current: ${currentDate}\n`;
+      section += `- Days Remaining: ${daysRemaining}\n`;
+    } catch (e) {
+      // Fallback if date parsing fails
+    }
+    section += `\n`;
+    
+    if (plan.successCriteria.length > 0) {
+      section += `**Success Criteria:**\n`;
+      plan.successCriteria.forEach(c => {
+        section += `- ${c}\n`;
+      });
+      section += `\n`;
+    }
+    
+    if (plan.constraints.length > 0) {
+      section += `**Constraints:**\n`;
+      plan.constraints.forEach(c => {
+        section += `- ${c}\n`;
+      });
+      section += `\n`;
+    }
+    
+    section += `---\n\n`;
+    return section;
+  }
+
+  /**
+   * Build Tasks section (filtered by profile)
+   */
+  private buildTasks(tasks: TasksData, profile: PromptProfile): string {
+    const normalized = this.normalizeTasksSection(tasks, profile);
+    const grouped = this.groupTasksByPriority(normalized);
+    
+    let section = `## ✅ Tasks (Tactical TODOs)\n\n`;
+    
+    if (profile.includeTasks.P0 && grouped.P0.length > 0) {
+      section += `**P0 Tasks (Critical):**\n`;
+      grouped.P0.forEach(t => {
+        const checkbox = t.completed ? '[x]' : '[ ]';
+        section += `- ${checkbox} ${t.task}\n`;
+      });
+      section += `\n`;
+    }
+    
+    if (profile.includeTasks.P1 && grouped.P1.length > 0) {
+      section += `**P1 Tasks (Important):**\n`;
+      grouped.P1.forEach(t => {
+        const checkbox = t.completed ? '[x]' : '[ ]';
+        section += `- ${checkbox} ${t.task}\n`;
+      });
+      section += `\n`;
+    }
+    
+    if (profile.includeTasks.P2 && grouped.P2.length > 0) {
+      section += `**P2 Tasks (Nice to have):**\n`;
+      grouped.P2.forEach(t => {
+        const checkbox = t.completed ? '[x]' : '[ ]';
+        section += `- ${checkbox} ${t.task}\n`;
+      });
+      section += `\n`;
+    }
+    
+    if (profile.includeTasks.completed && grouped.completed.length > 0) {
+      section += `**Completed (last 24h):**\n`;
+      grouped.completed.slice(0, 5).forEach(c => {
+        section += `- ${c.task} (${c.timestamp})\n`;
+      });
+      section += `\n`;
+    }
+    
+    if (tasks.blockers.length > 0) {
+      section += `**Blockers:**\n`;
+      tasks.blockers.forEach(b => {
+        section += `- ${b}\n`;
+      });
+      section += `\n`;
+    }
+    
+    section += `---\n\n`;
+    return section;
+  }
+
+  /**
+   * Normalize tasks section (filter, sort, deduplicate)
+   */
+  private normalizeTasksSection(tasks: TasksData, profile: PromptProfile): Array<{ task: string; completed: boolean; timestamp?: string }> {
+    const allTasks: Array<{ task: string; completed: boolean; timestamp?: string }> = [];
+    
+    // Add active tasks
+    tasks.active.forEach(t => {
+      allTasks.push({ task: t.task, completed: t.completed, timestamp: t.timestamp });
+    });
+    
+    // Add completed tasks if profile allows
+    if (profile.includeTasks.completed) {
+      tasks.completed.forEach(c => {
+        allTasks.push({ task: c.task, completed: true, timestamp: c.timestamp });
+      });
+    }
+    
+    // Remove duplicates by @rl4:id if present
+    const seen = new Set<string>();
+    return allTasks.filter(t => {
+      const idMatch = t.task.match(/@rl4:id=([^\s]+)/);
+      if (idMatch) {
+        const id = idMatch[1];
+        if (seen.has(id)) return false;
+        seen.add(id);
+      }
+      return true;
+    });
+  }
+
+  /**
+   * Group tasks by priority
+   */
+  private groupTasksByPriority(tasks: Array<{ task: string; completed: boolean; timestamp?: string }>): {
+    P0: Array<{ task: string; completed: boolean; timestamp?: string }>;
+    P1: Array<{ task: string; completed: boolean; timestamp?: string }>;
+    P2: Array<{ task: string; completed: boolean; timestamp?: string }>;
+    completed: Array<{ task: string; completed: boolean; timestamp?: string }>;
+  } {
+    const grouped = { P0: [] as any[], P1: [] as any[], P2: [] as any[], completed: [] as any[] };
+    
+    tasks.forEach(t => {
+      if (t.completed) {
+        grouped.completed.push(t);
+      } else if (t.task.includes('[P0]')) {
+        grouped.P0.push(t);
+      } else if (t.task.includes('[P1]')) {
+        grouped.P1.push(t);
+      } else if (t.task.includes('[P2]')) {
+        grouped.P2.push(t);
+      }
+    });
+    
+    return grouped;
+  }
+
+  /**
+   * Build Context section (level: minimal/rich/complete)
+   * ✅ P0-KPI-SEPARATION-04: Includes both LLM and Kernel KPIs
+   * ✅ P0-FIRSTUSE-OPTIMIZATION: Includes project domain/name/tech stack for firstUse
+   */
+  private buildContext(context: ContextData, level: 'minimal' | 'rich' | 'complete', data?: SnapshotData): string {
+    let section = `## 🔍 Context (Workspace State)\n\n`;
+    
+    // ✅ P0-FIRSTUSE-OPTIMIZATION: Add project context at the top for firstUse
+    if (data && data.deviationMode === 'firstUse' && level === 'complete') {
+      const projectName = data.detectedProject?.name || 'Unknown';
+      const projectDomain = data.projectContext?.stackDetected?.join(', ') || data.detectedProject?.description || 'Unknown';
+      const techStack = data.projectContext?.stackDetected?.join(', ') || 
+                       (data.bootstrap?.technologies?.join(', ') || 'Unknown');
+      
+      section += `**Project Domain:** ${projectDomain} *(extracted from README.md/package.json)*\n`;
+      section += `**Project Name:** ${projectName} *(extracted from package.json/README.md)*\n`;
+      section += `**Tech Stack:** ${techStack} *(extracted from package.json + ADRs.RL4)*\n\n`;
+    }
+    
+    if (level === 'minimal') {
+      section += `**Active Files:** ${context.activeFiles.length}\n`;
+      section += `**Recent Activity:** ${context.recentActivity.cycles} cycles, ${context.recentActivity.commits} commits\n\n`;
+    } else if (level === 'rich') {
+      section += `**Active Files:**\n`;
+      context.activeFiles.slice(0, 10).forEach(f => {
+        section += `- ${f}\n`;
+      });
+      section += `\n`;
+      section += `**Recent Activity:**\n`;
+      section += `- Cycles: ${context.recentActivity.cycles}\n`;
+      section += `- Commits: ${context.recentActivity.commits}\n`;
+      section += `- Duration: ${context.recentActivity.duration}\n\n`;
+      section += `**Health:**\n`;
+      section += `- Memory: ${context.health.memory}\n`;
+      section += `- Event Loop: ${context.health.eventLoop}\n\n`;
+    } else { // complete
+      section += `**Active Files:**\n`;
+      context.activeFiles.forEach(f => {
+        section += `- ${f}\n`;
+      });
+      section += `\n`;
+      section += `**Recent Activity:**\n`;
+      section += `- Cycles: ${context.recentActivity.cycles}\n`;
+      section += `- Commits: ${context.recentActivity.commits}\n`;
+      section += `- Duration: ${context.recentActivity.duration}\n\n`;
+      section += `**Health:**\n`;
+      section += `- Memory: ${context.health.memory}\n`;
+      section += `- Event Loop: ${context.health.eventLoop}\n`;
+      section += `- Uptime: ${context.health.uptime}\n\n`;
+      
+      // ✅ P0-KPI-SEPARATION-04: Include LLM KPIs (high-level cognition)
+      if (context.kpis_llm && context.kpis_llm.length > 0) {
+        section += `## KPIs LLM (High-Level Cognition)\n\n`;
+        section += `**Source:** LLM reasoning, patterns, goals, plan drift analysis\n\n`;
+        context.kpis_llm.slice(-3).forEach(kpi => {
+          section += `### Cycle ${kpi.cycle}\n`;
+          section += `- Cognitive Load: ${kpi.cognitive_load}%\n`;
+          section += `- Next Steps: ${kpi.next_steps.join(', ') || 'None'}\n`;
+          section += `- Plan Drift: ${kpi.plan_drift}%\n`;
+          section += `- Risks: ${kpi.risks.join(', ') || 'None'}\n`;
+          if (kpi.opportunities && kpi.opportunities.length > 0) {
+            section += `- Opportunities: ${kpi.opportunities.join(', ')}\n`;
+          }
+          section += `- Updated: ${kpi.updated}\n\n`;
+        });
+      }
+      
+      // ✅ P0-KPI-SEPARATION-04: Include Kernel KPIs (mechanical metrics)
+      if (context.kpis_kernel && context.kpis_kernel.length > 0) {
+        section += `## KPIs Kernel (Mechanical Metrics)\n\n`;
+        section += `**Source:** Kernel cycle execution, scheduler state, queue management\n\n`;
+        context.kpis_kernel.slice(-3).forEach(kpi => {
+          section += `### Cycle ${kpi.cycle}\n`;
+          section += `- Cognitive Load: ${kpi.cognitive_load}%\n`;
+          section += `- Drift: ${kpi.drift}%\n`;
+          section += `- Patterns Detected: ${kpi.patterns_detected}\n`;
+          section += `- Tasks Active: ${kpi.tasks_active}\n`;
+          if (kpi.queue_length !== undefined) {
+            section += `- Queue Length: ${kpi.queue_length}\n`;
+          }
+          if (kpi.scheduler_state) {
+            section += `- Scheduler State: ${kpi.scheduler_state}\n`;
+          }
+          section += `- Updated: ${kpi.updated}\n\n`;
+        });
+      }
+      
+      if (context.observations.length > 0) {
+        section += `**Observations:**\n`;
+        context.observations.forEach(o => {
+          section += `- ${o}\n`;
+        });
+        section += `\n`;
+      }
+    }
+    
+    section += `---\n\n`;
+    return section;
+  }
+
+  /**
+   * Build Activity Reconstruction section (since last snapshot)
+   * ✅ P2: Shows what happened between snapshots
+   */
+  private async buildActivityReconstruction(data: SnapshotData): Promise<string | null> {
+    try {
+      // Read last snapshot time from reminder_state.json
+      const reminderStatePath = path.join(this.rl4Path, 'reminder_state.json');
+      if (!fs.existsSync(reminderStatePath)) {
+        return null; // No previous snapshot
+      }
+      
+      const reminderState = JSON.parse(fs.readFileSync(reminderStatePath, 'utf-8'));
+      const lastSnapshotTime = reminderState.lastSnapshotTime;
+      
+      if (!lastSnapshotTime) {
+        return null; // No previous snapshot
+      }
+      
+      // Get workspace root from rl4Path
+      const workspaceRoot = path.dirname(this.rl4Path);
+      
+      // Reconstruct activity
+      const reconstructor = new ActivityReconstructor(workspaceRoot);
+      const activity = await reconstructor.reconstruct(
+        new Date(lastSnapshotTime).toISOString(),
+        new Date().toISOString()
+      );
+      
+      // Build section
+      let section = `## 📊 Activity Since Last Snapshot\n\n`;
+      section += `**Duration:** ${this.formatDuration(activity.durationMs)}\n`;
+      section += `**Summary:** ${activity.summary}\n\n`;
+      
+      // File changes
+      if (activity.fileChanges.total > 0) {
+        section += `### File Changes (${activity.fileChanges.total})\n`;
+        const topPatterns = Object.entries(activity.fileChanges.byPattern)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5);
+        if (topPatterns.length > 0) {
+          section += `**By Pattern:** ${topPatterns.map(([p, c]) => `${p} (${c})`).join(', ')}\n`;
+        }
+        section += `\n`;
+      }
+      
+      // Terminal events
+      if (activity.terminalEvents.total > 0) {
+        section += `### Terminal Activity (${activity.terminalEvents.total} commands)\n`;
+        section += `**Success Rate:** ${activity.terminalEvents.successRate}%\n`;
+        const taskIds = Object.keys(activity.terminalEvents.byTask);
+        if (taskIds.length > 0) {
+          section += `**Tasks Involved:** ${taskIds.slice(0, 5).join(', ')}${taskIds.length > 5 ? ` (+${taskIds.length - 5} more)` : ''}\n`;
+        }
+        section += `\n`;
+      }
+      
+      // Correlations
+      if (activity.correlations.length > 0) {
+        section += `### Key Observations\n`;
+        activity.correlations.slice(0, 5).forEach(c => {
+          section += `- ${c.description}\n`;
+        });
+        section += `\n`;
+      }
+      
+      section += `---\n\n`;
+      return section;
+      
+    } catch (error) {
+      console.error('[UnifiedPromptBuilder] Failed to reconstruct activity:', error);
+      return null; // Silent fail
+    }
+  }
+  
+  /**
+   * Format duration in human-readable format
+   */
+  private formatDuration(ms: number): string {
+    const hours = Math.floor(ms / 3600000);
+    const minutes = Math.floor((ms % 3600000) / 60000);
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}min`;
+    } else {
+      return `${minutes}min`;
+    }
+  }
+
+  /**
+   * Build Bootstrap section (firstUse only)
+   */
+  private buildBootstrapSection(bootstrap: any): string {
+    let section = `## 🚀 First Use Deep Analysis\n\n`;
+    
+    if (!bootstrap) {
+      section += `⚠️ Bootstrap data unavailable (bootstrap.json not found)\n\n`;
+      section += `---\n\n`;
+      return section;
+    }
+    
+    section += `**Project Structure:**\n`;
+    if (bootstrap.structure) {
+      section += `${JSON.stringify(bootstrap.structure, null, 2)}\n\n`;
+    }
+    
+    section += `**Detected Technologies:**\n`;
+    if (bootstrap.technologies) {
+      bootstrap.technologies.forEach((tech: string) => {
+        section += `- ${tech}\n`;
+      });
+      section += `\n`;
+    }
+    
+    section += `---\n\n`;
+    return section;
+  }
+
+  /**
+   * Build Timeline and BlindSpot section
+   */
+  private buildTimelineAndBlindSpot(data: SnapshotData, profile: PromptProfile): string {
+    let section = `## 📊 Timeline & Blind Spot Analysis\n\n`;
+    
+    if (profile.sections.timeline === 'condensed') {
+      section += `**Recent Timeline (condensed):**\n`;
+      data.timeline.slice(-10).forEach((entry: any) => {
+        section += `- ${entry.timestamp || entry.time}: ${entry.type || 'event'}\n`;
+      });
+      section += `\n`;
+    } else if (profile.sections.timeline === 'complete' || profile.sections.timeline === 'extended') {
+      section += `**Timeline:**\n`;
+      data.timeline.forEach((entry: any) => {
+        section += `- ${entry.timestamp || entry.time}: ${entry.type || 'event'}\n`;
+      });
+      section += `\n`;
+    }
+    
+    if (profile.sections.blindSpot === 'selective' || profile.sections.blindSpot === 'complete' || profile.sections.blindSpot === 'extended') {
+      section += `**File Patterns:**\n`;
+      const fileKeys = Object.keys(data.filePatterns).slice(0, 10);
+      fileKeys.forEach(key => {
+        section += `- ${key}: ${data.filePatterns[key]}\n`;
+      });
+      section += `\n`;
+      
+      section += `**Git History:**\n`;
+      data.gitHistory.slice(0, 10).forEach((commit: any) => {
+        section += `- ${commit.hash?.substring(0, 7) || 'unknown'}: ${commit.message || commit.msg || 'no message'}\n`;
+      });
+      section += `\n`;
+    }
+    
+    section += `---\n\n`;
+    return section;
+  }
+
+  /**
+   * Build History Summary section (free only)
+   */
+  private buildHistorySummary(history: HistorySummary): string {
+    let section = `## 📜 History Summary (30 days)\n\n`;
+    section += `**Summary:** ${JSON.stringify(history, null, 2)}\n\n`;
+    section += `---\n\n`;
+    return section;
+  }
+
+  /**
+   * Build Engine Data section
+   */
+  private buildEngineData(data: SnapshotData, level: 'minimal' | 'complete'): string {
+    let section = `## ⚙️ Engine-Generated Data\n\n`;
+    
+    if (level === 'minimal') {
+      section += `**Patterns:** ${data.enginePatterns.length}\n`;
+      section += `**Correlations:** ${data.engineCorrelations.length}\n`;
+      section += `**Forecasts:** ${data.engineForecasts.length}\n\n`;
+    } else {
+      section += `**Patterns:**\n`;
+      data.enginePatterns.forEach((p: any) => {
+        section += `- ${p.id || 'unknown'}: ${p.description || JSON.stringify(p)}\n`;
+      });
+      section += `\n`;
+      
+      section += `**Correlations:**\n`;
+      data.engineCorrelations.forEach((c: any) => {
+        section += `- ${c.type || 'unknown'}: ${c.description || JSON.stringify(c)}\n`;
+      });
+      section += `\n`;
+      
+      section += `**Forecasts:**\n`;
+      data.engineForecasts.forEach((f: any) => {
+        section += `- ${f.predicted || 'unknown'}: ${f.confidence || 0}\n`;
+      });
+      section += `\n`;
+    }
+    
+    section += `---\n\n`;
+    return section;
+  }
+
+  /**
+   * Build Anomalies section
+   */
+  private buildAnomalies(anomalies: any[], filter: 'critical' | 'medium,critical' | 'all'): string {
+    if (anomalies.length === 0) return '';
+    
+    let section = `## 🚨 Anomalies Detected\n\n`;
+    
+    anomalies.forEach((anomaly: any) => {
+      const severityEmoji = anomaly.severity === 'critical' ? '🔴' : 
+                           anomaly.severity === 'high' ? '🟠' : 
+                           anomaly.severity === 'medium' ? '🟡' : '🟢';
+      section += `${severityEmoji} **${anomaly.type || 'unknown'}** (${anomaly.severity || 'unknown'})\n`;
+      section += `- ${anomaly.description || 'No description'}\n`;
+      if (anomaly.recommendation) {
+        section += `- Recommendation: ${anomaly.recommendation}\n`;
+      }
+      section += `\n`;
+    });
+    
+    section += `---\n\n`;
+    return section;
+  }
+
+  /**
+   * Build Agent Instructions section (strict formal rules)
+   */
+  private buildAgentInstructions(data: SnapshotData, profile: PromptProfile): string {
+    let instructions = `## 🎯 Agent Instructions\n\n`;
+    
+    instructions += `**MODE:** ${profile.mode.toUpperCase()}\n\n`;
+    instructions += `**YOUR MISSION:**\n\n`;
+    instructions += `You are a reasoning agent that updates RL4 workspace state by **writing directly to .RL4 files**.\n`;
+    instructions += `The Kernel will detect your changes and trigger a cognitive cycle automatically.\n\n`;
+    
+    instructions += `**WORKFLOW:**\n\n`;
+    if (profile.mode === 'firstUse') {
+      instructions += `1. **Extract project context** from README.md, package.json, ADRs.RL4 (see Project Context Discovery section)\n`;
+      instructions += `2. **Analyze the snapshot context** (Plan, Tasks, Context sections)\n`;
+      instructions += `3. **Calculate KPIs** (Cognitive Load, Next Steps, Plan Drift, Risks) **WITH project domain context**\n`;
+      instructions += `4. **Generate RL4 file patches** (see format below)\n`;
+      instructions += `5. Cursor applies your patches → Kernel detects → Cycle triggers → New snapshot generated\n\n`;
+    } else {
+      instructions += `1. Analyze the snapshot context\n`;
+      instructions += `2. Calculate KPIs (Cognitive Load, Next Steps, Plan Drift, Risks)\n`;
+      instructions += `3. Generate RL4 file patches (see format below)\n`;
+      instructions += `4. Cursor applies your patches → Kernel detects → Cycle triggers → New snapshot generated\n\n`;
+    }
+    
+    instructions += `**STRICT RULES:**\n\n`;
+    instructions += `1. **YOU MUST write valid Markdown with YAML frontmatter**\n`;
+    instructions += `2. **YOU MUST preserve all @rl4:id= tags** (never modify, never delete)\n`;
+    instructions += `3. **YOU MUST preserve YAML frontmatter** (version, updated, confidence, bias)\n`;
+    instructions += `4. **YOU MUST respect section structure** (## Phase, ## Active (P0), ## KPIs, etc.)\n`;
+    instructions += `5. **YOU MUST NOT invent files** (only Plan.RL4, Tasks.RL4, Context.RL4, ADRs.RL4)\n`;
+    instructions += `6. **YOU MUST NOT write code** (only Markdown content)\n`;
+    instructions += `7. **YOU MUST NOT modify UnifiedPromptBuilder.ts or PromptOptimizer.ts**\n`;
+    instructions += `8. **YOU MUST NOT hallucinate metadata** (kernel cycle, merkle root, etc.)\n`;
+    instructions += `9. **YOU MUST use tools to write files** (search_replace, write, etc.)\n\n`;
+    
+    instructions += `**RL4 FILE STRUCTURE:**\n\n`;
+    instructions += `Every .RL4 file has this format:\n`;
+    instructions += `\`\`\`markdown\n`;
+    instructions += `---\n`;
+    instructions += `version: 1.0.0\n`;
+    instructions += `updated: 2025-11-18T16:00:00Z\n`;
+    instructions += `confidence: 0.85\n`;
+    instructions += `bias: 5\n`;
+    instructions += `---\n\n`;
+    instructions += `# Title\n\n`;
+    instructions += `## Section 1\n`;
+    instructions += `Content...\n`;
+    instructions += `\`\`\`\n\n`;
+    
+    instructions += `**ALLOWED MODIFICATIONS:**\n\n`;
+    instructions += `**Plan.RL4:**\n`;
+    instructions += `- Update ## Phase (if project phase changed)\n`;
+    instructions += `- Update ## Goal (if strategic goal evolved)\n`;
+    instructions += `- Update ## Timeline (if dates shifted)\n`;
+    instructions += `- Update ## Success Criteria (if criteria changed)\n`;
+    if (profile.mode === 'firstUse') {
+      instructions += `- **Add ## Project Overview** (extracted from README.md) if missing\n`;
+    }
+    instructions += `\n`;
+    
+    instructions += `**Tasks.RL4:**\n`;
+    instructions += `- Add new tasks to ## Active (P0), ## Active (P1), ## Active (P2)\n`;
+    instructions += `- Move completed tasks to ## Completed\n`;
+    instructions += `- Update ## Blockers\n`;
+    instructions += `- NEVER remove @rl4:id= tags\n`;
+    instructions += `- NEVER modify @rl4:completeWhen conditions without explicit request\n\n`;
+    
+   instructions += `**Context.RL4:**\n`;
+   instructions += `- Update kpis_llm in YAML frontmatter (Cognitive Load, Next Steps, Plan Drift, Risks, Opportunities)\n`;
+   instructions += `- ⚠️ NEVER modify kpis_kernel (Kernel manages this automatically)\n`;
+    instructions += `- Update ## Active Files\n`;
+    instructions += `- Update ## Recent Activity\n`;
+    instructions += `- Update ## Health (Memory, Event Loop, Uptime)\n`;
+    if (profile.mode === 'firstUse') {
+      instructions += `- **Update ## Agent Observations** with project domain context (name, domain, tech stack from README.md/package.json)\n`;
+      instructions += `- **Add ## Project Context** section if missing (project name, domain, description, architecture)\n`;
+    } else {
+      instructions += `- Update ## Observations\n`;
+    }
+    instructions += `\n`;
+    
+    instructions += `**ADRs.RL4:**\n`;
+    instructions += `- Add new ADRs to ## Active ADRs\n`;
+    instructions += `- Move accepted ADRs to ## Accepted\n`;
+    instructions += `- Move rejected ADRs to ## Rejected\n\n`;
+    
+    instructions += `**FORBIDDEN ACTIONS:**\n\n`;
+    instructions += `- ❌ Do NOT delete @rl4:id= tags\n`;
+    instructions += `- ❌ Do NOT modify version/updated/confidence/bias without recalculating\n`;
+    instructions += `- ❌ Do NOT rewrite entire files (use surgical edits)\n`;
+    if (profile.mode === 'firstUse') {
+      instructions += `- ❌ Do NOT invent new sections (except Project Overview/Project Context if missing)\n`;
+    } else {
+      instructions += `- ❌ Do NOT invent new sections\n`;
+    }
+    instructions += `- ❌ Do NOT write JSON (write Markdown)\n`;
+    instructions += `- ❌ Do NOT modify files outside .reasoning_rl4/\n`;
+    if (profile.mode === 'firstUse') {
+      instructions += `- ❌ Do NOT update Context.RL4 without enriching it with project domain context\n`;
+    }
+    instructions += `\n`;
+    
+    // STRICT MODE ONLY: Add dual-message UX rule
+    if (profile.mode === 'strict') {
+      instructions += `**STRICT MODE UX:**\n\n`;
+      instructions += `After applying your file modifications, you MUST produce a second message (in the chat language) that contains:\n`;
+      instructions += `- A clear explanation of what you just did\n`;
+      instructions += `- Your recommendations based on the changes\n`;
+      instructions += `- The next steps the user should take\n\n`;
+      instructions += `This message must never contain code, must never modify files, and must remain aligned with your changes.\n\n`;
+    }
+    
+    instructions += `**Current State:**\n`;
+    instructions += `- Bias: ${(data.bias * 100).toFixed(0)}% / ${(profile.rules.threshold * 100).toFixed(0)}% threshold\n`;
+    instructions += `- Confidence: ${(data.confidence * 100).toFixed(0)}%\n`;
+    instructions += `- Kernel Cycle: ${data.metadata.kernelCycle}\n`;
+    instructions += `- Mode: ${profile.mode}\n\n`;
+    
+    instructions += `**REMEMBER:**\n`;
+    if (profile.mode === 'firstUse') {
+      instructions += `1. Always extract project context FIRST from README.md and package.json\n`;
+      instructions += `2. Enrich Context.RL4 with project domain information in ## Agent Observations\n`;
+      instructions += `3. The Kernel will automatically detect your changes and trigger a new cognitive cycle\n`;
+      instructions += `4. No manual intervention required. Just write clean, valid Markdown to .RL4 files.\n\n`;
+    } else {
+      instructions += `The Kernel will automatically detect your changes and trigger a new cognitive cycle.\n`;
+      instructions += `No manual intervention required. Just write clean, valid Markdown to .RL4 files.\n\n`;
+    }
+    
+    return instructions;
+  }
+
+  /**
+   * Enforce size limits on prompt
+   */
+  private enforceSizeLimits(prompt: string, profile: PromptProfile): string {
+    const limits = this.getSizeLimits(profile.mode);
+    
+    if (prompt.length > limits.maxChars) {
+      // Truncate from middle sections (keep header and agent instructions)
+      const headerEnd = prompt.indexOf('---\n\n', prompt.indexOf('CRITICAL RULES'));
+      const agentStart = prompt.lastIndexOf('## 🎯 Agent Instructions');
+      
+      if (headerEnd > 0 && agentStart > headerEnd) {
+        const header = prompt.substring(0, headerEnd);
+        const agent = prompt.substring(agentStart);
+        const available = limits.maxChars - header.length - agent.length - 100; // 100 for separator
+        
+        const middle = prompt.substring(headerEnd, agentStart);
+        const truncated = middle.length > available 
+          ? middle.substring(0, available) + '\n\n[... truncated for size ...]\n\n'
+          : middle;
+        
+        return header + truncated + agent;
+      }
+    }
+    
+    return prompt;
+  }
+
+  /**
+   * Get size limits per mode
+   */
+  private getSizeLimits(mode: string): { maxChars: number; maxTokens: number } {
+    switch (mode) {
+      case 'strict':
+        return { maxChars: 5000, maxTokens: 1250 };
+      case 'flexible':
+        return { maxChars: 10000, maxTokens: 2500 };
+      case 'exploratory':
+        return { maxChars: 20000, maxTokens: 5000 };
+      case 'free':
+        return { maxChars: 50000, maxTokens: 12500 };
+      case 'firstUse':
+        return { maxChars: 30000, maxTokens: 7500 };
+      default:
+        return { maxChars: 10000, maxTokens: 2500 };
     }
   }
 }

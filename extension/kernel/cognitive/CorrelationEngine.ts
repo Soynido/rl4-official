@@ -45,20 +45,29 @@ export class CorrelationEngine {
      * Analyze recent events for correlations with learned patterns
      */
     public async analyze(): Promise<Correlation[]> {
+        console.log(`[P0-CORE-00] CorrelationEngine.analyze() started`);
+        
         // Load patterns
         const patterns = await this.loadPatterns();
+        console.log(`[P0-CORE-00] CorrelationEngine: Loaded ${patterns?.length || 0} patterns`);
+        
         if (!patterns || patterns.length === 0) {
+            console.log(`[P0-CORE-00] CorrelationEngine: No patterns available for correlation analysis - returning []`);
             console.log('🔗 No patterns available for correlation analysis');
             return [];
         }
 
         // Load recent events from traces (primary source for RL4)
         const recentEvents = await this.loadFromTraces();
+        console.log(`[P0-CORE-00] CorrelationEngine: Loaded ${recentEvents?.length || 0} events from traces`);
+        
         if (!recentEvents || recentEvents.length === 0) {
+            console.log(`[P0-CORE-00] CorrelationEngine: No events available for correlation analysis - returning []`);
             console.log('🔗 No events available for correlation analysis');
             return [];
         }
 
+        console.log(`[P0-CORE-00] CorrelationEngine: Analyzing ${recentEvents.length} events against ${patterns.length} patterns`);
         console.log(`🧩 Analyzing ${recentEvents.length} recent events against ${patterns.length} patterns`);
         
         // Additional debug - write to file for inspection
@@ -289,16 +298,29 @@ export class CorrelationEngine {
 
     /**
      * Load events from traces (primary source for RL4)
+     * ✅ P0-CORE-00: Enhanced logging for diagnostic
      */
     private async loadFromTraces(): Promise<LedgerEntry[]> {
         const tracesDir = path.join(this.workspaceRoot, '.reasoning_rl4', 'traces');
         const events: LedgerEntry[] = [];
         
+        console.log(`[P0-CORE-00] CorrelationEngine: Loading events from traces directory: ${tracesDir}`);
+        console.log(`[P0-CORE-00] CorrelationEngine: Traces directory exists: ${fs.existsSync(tracesDir)}`);
+        
         try {
             // Load git commits
             const gitPath = path.join(tracesDir, 'git_commits.jsonl');
+            console.log(`[P0-CORE-00] CorrelationEngine: Checking git_commits.jsonl: ${gitPath}`);
+            console.log(`[P0-CORE-00] CorrelationEngine: Git commits file exists: ${fs.existsSync(gitPath)}`);
+            
             if (fs.existsSync(gitPath)) {
-                const lines = fs.readFileSync(gitPath, 'utf-8').trim().split('\n').filter(l => l);
+                const content = fs.readFileSync(gitPath, 'utf-8');
+                const lines = content.trim().split('\n').filter(l => l);
+                console.log(`[P0-CORE-00] CorrelationEngine: Git commits file has ${lines.length} lines`);
+                
+                let parsedCount = 0;
+                let errorCount = 0;
+                
                 for (const line of lines) {
                     try {
                         const event = JSON.parse(line);
@@ -324,16 +346,30 @@ export class CorrelationEngine {
                                 impact: 'neutral'
                             }
                         });
+                        parsedCount++;
                     } catch (err) {
-                        console.error('Failed to parse git commit trace:', err);
+                        errorCount++;
+                        console.warn(`[P0-CORE-00] CorrelationEngine: Failed to parse git commit trace: ${err}`);
                     }
                 }
+                console.log(`[P0-CORE-00] CorrelationEngine: Parsed ${parsedCount} git commits, ${errorCount} errors`);
+            } else {
+                console.log(`[P0-CORE-00] CorrelationEngine: Git commits file does not exist - this is normal for new workspaces`);
             }
             
             // Load file changes
             const filesPath = path.join(tracesDir, 'file_changes.jsonl');
+            console.log(`[P0-CORE-00] CorrelationEngine: Checking file_changes.jsonl: ${filesPath}`);
+            console.log(`[P0-CORE-00] CorrelationEngine: File changes file exists: ${fs.existsSync(filesPath)}`);
+            
             if (fs.existsSync(filesPath)) {
-                const lines = fs.readFileSync(filesPath, 'utf-8').trim().split('\n').filter(l => l);
+                const content = fs.readFileSync(filesPath, 'utf-8');
+                const lines = content.trim().split('\n').filter(l => l);
+                console.log(`[P0-CORE-00] CorrelationEngine: File changes file has ${lines.length} lines`);
+                
+                let parsedCount = 0;
+                let errorCount = 0;
+                
                 for (const line of lines) {
                     try {
                         const raw = JSON.parse(line);
@@ -350,10 +386,52 @@ export class CorrelationEngine {
                                 intent: { type: raw.metadata?.pattern || 'change' }
                             }
                         });
-                    } catch {}
+                        parsedCount++;
+                    } catch (err) {
+                        errorCount++;
+                        console.warn(`[P0-CORE-00] CorrelationEngine: Failed to parse file change trace: ${err}`);
+                    }
                 }
+                console.log(`[P0-CORE-00] CorrelationEngine: Parsed ${parsedCount} file changes, ${errorCount} errors`);
+            } else {
+                console.log(`[P0-CORE-00] CorrelationEngine: File changes file does not exist - this is normal`);
             }
             
+            // Load IDE activity
+            const idePath = path.join(tracesDir, 'ide_activity.jsonl');
+            console.log(`[P0-CORE-00] CorrelationEngine: Checking ide_activity.jsonl: ${idePath}`);
+            console.log(`[P0-CORE-00] CorrelationEngine: IDE activity file exists: ${fs.existsSync(idePath)}`);
+            
+            if (fs.existsSync(idePath)) {
+                const content = fs.readFileSync(idePath, 'utf-8');
+                const lines = content.trim().split('\n').filter(l => l);
+                console.log(`[P0-CORE-00] CorrelationEngine: IDE activity file has ${lines.length} lines`);
+                
+                let parsedCount = 0;
+                let errorCount = 0;
+                
+                for (const line of lines) {
+                    try {
+                        const event = JSON.parse(line);
+                        events.push({
+                            entry_id: event.id || `ide-${Date.now()}`,
+                            type: 'ide_activity',
+                            target_id: event.file || '',
+                            timestamp: event.timestamp,
+                            data: event
+                        });
+                        parsedCount++;
+                    } catch (err) {
+                        errorCount++;
+                        console.warn(`[P0-CORE-00] CorrelationEngine: Failed to parse IDE activity trace: ${err}`);
+                    }
+                }
+                console.log(`[P0-CORE-00] CorrelationEngine: Parsed ${parsedCount} IDE activities, ${errorCount} errors`);
+            } else {
+                console.log(`[P0-CORE-00] CorrelationEngine: IDE activity file does not exist - this is normal`);
+            }
+            
+            console.log(`[P0-CORE-00] CorrelationEngine: Total events loaded from traces: ${events.length}`);
             console.log(`✅ Loaded ${events.length} events from traces`);
         } catch (error) {
             console.error('Failed to load traces:', error);

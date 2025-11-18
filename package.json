@@ -91,9 +91,9 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "webpack --mode production",
+    "compile": "webpack --mode production && node scripts/patch-exports.js",
     "watch": "webpack --mode development --watch",
-    "build": "webpack --mode production",
+    "build": "webpack --mode production && node scripts/patch-exports.js",
     "dev": "webpack --mode development --watch",
     "test": "jest",
     "test:whereami": "ts-node tests/whereami-snapshot.test.ts",

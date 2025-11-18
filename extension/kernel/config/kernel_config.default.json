@@ -1,0 +1,93 @@
+{
+  "$schema": "./kernel_config_schema.json",
+  "version": "1.0.0",
+  "kernel_identity": "rl4_mvp",
+  
+  "verrous_blocking": [
+    "V1",
+    "V2",
+    "V3",
+    "V6",
+    "V16",
+    "V17"
+  ],
+  
+  "verrous_soft": [
+    "V4",
+    "V5",
+    "V7",
+    "V9",
+    "V10",
+    "V13",
+    "V14",
+    "V15"
+  ],
+  
+  "verrous_descriptions": {
+    "V1": "Anti-YAML Rewrite: YAML structure must be valid",
+    "V2": "Anti-YAML Reordering: Key order must be preserved",
+    "V3": "Kernel Wins: LLM cannot modify kpis_kernel",
+    "V4": "Anti-Indirect Files: No creating utils/helpers/boilerplate",
+    "V5": "Anti-Textual Deviation: Max 20% text change in non-modifiable fields",
+    "V6": "Snapshot Atomicity: All 3 files must be parseable",
+    "V7": "Orphan Tasks: Max 3 tasks not tied to active phase",
+    "V9": "First Use Lock: Cannot modify first_use_lock or ground_truth",
+    "V10": "DAG: Tasks must not have cyclic dependencies",
+    "V13": "Volume Limits: Max tasks/criteria/observations",
+    "V14": "Cross-File Consistency: Plan/Tasks/Context must be coherent",
+    "V15": "Mode Signature: LLM response must match mode constraints",
+    "V16": "Required Keys: All mandatory keys must be present",
+    "V17": "Response Contract: LLM response must have 3 RL4 blocks with frontmatter"
+  },
+  
+  "volume_limits": {
+    "max_tasks": 40,
+    "max_tasks_firstuse": 10,
+    "max_success_criteria_firstuse": 5,
+    "max_active_phases": 1,
+    "max_backlog_phases": 4,
+    "max_observations": 20,
+    "max_context_lines": 200
+  },
+  
+  "deviation_mode": "flexible",
+  "deviation_threshold": 0.25,
+  
+  "modes": {
+    "strict": {
+      "threshold": 0.0,
+      "allowed_deviations": []
+    },
+    "flexible": {
+      "threshold": 0.25,
+      "allowed_deviations": ["P1", "minor_refactor"]
+    },
+    "exploratory": {
+      "threshold": 0.50,
+      "allowed_deviations": ["P2", "experiments"]
+    },
+    "free": {
+      "threshold": 1.0,
+      "allowed_deviations": ["all"]
+    }
+  },
+  
+  "pipeline": {
+    "s_structural_blocking": true,
+    "p_permissions_blocking": true,
+    "l_logical_blocking": false,
+    "b_behavioral_blocking": false
+  },
+  
+  "rollback": {
+    "enabled": true,
+    "quarantine_log_enabled": true,
+    "auto_rollback_on_blocking_error": true
+  },
+  
+  "ground_truth": {
+    "immutable": true,
+    "drift_alert_threshold": 0.30
+  }
+}
+

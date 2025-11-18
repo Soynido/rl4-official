@@ -1,0 +1,58 @@
+---
+description: "[RL4] Stable cognitive mode — ignore internal RL4 writes"
+globs: 
+  - ".reasoning_rl4/**/*.RL4"
+  - ".reasoning_rl4/*.RL4"
+manual: true
+alwaysApply: false
+---
+
+# RL4 FILES ARE PROTECTED BY DEFAULT
+
+## 🔒 NEVER modify Plan.RL4, Tasks.RL4, Context.RL4, ADRs.RL4
+
+Unless the USER explicitly pastes a snapshot or patch request.
+
+## 🧠 Behavior:
+
+- DO NOT rewrite RL4 files automatically.
+- DO NOT normalize or format them.
+- DO NOT apply automatic corrections.
+- DO NOT update versions.
+- DO NOT rewrite timestamps.
+- DO NOT trigger actions based on FS change.
+- **DO NOT read RL4 files in response to filesystem events.**
+
+## 📥 Allowed actions (ONLY after explicit user prompt):
+
+1. Generate RL4_PATCH blocks
+2. Apply requested changes to RL4 files
+3. Validate structure
+4. Maintain @rl4:id
+
+## 🚫 FORBIDDEN AUTOMATIC ACTIONS:
+
+- ❌ `read_file('.reasoning_rl4/Context.RL4')` in response to FS events
+- ❌ `read_file('.reasoning_rl4/Plan.RL4')` without explicit user request
+- ❌ `read_file('.reasoning_rl4/Tasks.RL4')` as part of validation loop
+- ❌ Analyzing RL4 content proactively
+- ❌ Reacting to file watcher events for `.RL4` files
+
+## ⏱️ COOLING PERIOD:
+
+If you see a `.RL4` file change:
+- **Wait for explicit user prompt**
+- Do NOT read it automatically
+- Do NOT analyze it proactively
+- **The kernel handles internal state — you are NOT the kernel**
+
+## 🎯 RATIONALE:
+
+This prevents infinite loops where:
+1. RL4 kernel writes KPIs to Context.RL4
+2. Cursor AI detects FS change
+3. Cursor AI reads Context.RL4 → triggers another FS event
+4. LiveWatcher sees "external change" → triggers runCycle()
+5. Kernel writes KPIs again → LOOP
+
+**The kernel manages .RL4 files. The LLM consumes them only on user request.**

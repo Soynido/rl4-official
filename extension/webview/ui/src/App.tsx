@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { 
   CognitiveLoadCard, 
@@ -96,6 +96,24 @@ export default function App() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [deviationMode, setDeviationMode] = useState<DeviationMode>('flexible');
   
+  // ✅ FIX #2: Timer management to prevent memory leaks
+  const feedbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // ✅ FIX #2: Helper to set feedback with auto-cleanup
+  const setFeedbackWithTimeout = (message: string, duration: number) => {
+    // Clear existing timer
+    if (feedbackTimerRef.current) {
+      clearTimeout(feedbackTimerRef.current);
+    }
+    
+    setFeedback(message);
+    
+    feedbackTimerRef.current = setTimeout(() => {
+      setFeedback(null);
+      feedbackTimerRef.current = null;
+    }, duration);
+  };
+  
   // KPI States
   const [cognitiveLoad, setCognitiveLoad] = useState<CognitiveLoadData | null>(null);
   const [nextTasks, setNextTasks] = useState<NextTasksData | null>(null);
@@ -157,6 +175,33 @@ export default function App() {
   }
   const [adHocActions, setAdHocActions] = useState<AdHocAction[]>([]);
 
+  // Kernel Status state
+  interface KernelStatus {
+    ready: boolean;
+    message?: string;
+    initializing?: boolean;
+    error?: boolean;
+    status?: {
+      running: boolean;
+      uptime: number;
+      health: any;
+      timers: number;
+      queueSize: number;
+      version: string;
+      cycleCount: number;
+      safeMode: boolean;
+      corruptionReason: string | null;
+    };
+  }
+  const [kernelStatus, setKernelStatus] = useState<KernelStatus | null>(null);
+
+  // 🟥 TEST: Count renders (dev mode only)
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.count("RENDER");
+    }
+  }, []); // ✅ FIX #1: Added empty dependency array - runs only once on mount
+
   // Listen for messages from extension
   useEffect(() => {
     const messageHandler = (event: MessageEvent) => {
@@ -180,16 +225,15 @@ export default function App() {
         case 'taskLogChanged':
           // payload: { newCount, changedCount }
           if (message.payload) {
-            setDevBadge({
-              newCount: message.payload.newCount ?? devBadge.newCount,
-              changedCount: message.payload.changedCount ?? devBadge.changedCount
-            });
+            setDevBadge(prev => ({ // ✅ FIX #3: Functional update to avoid stale closure
+              newCount: message.payload.newCount ?? prev.newCount,
+              changedCount: message.payload.changedCount ?? prev.changedCount
+            }));
           }
           break;
         case 'patchPreview':
           setPatchPreview(message.payload || null);
-          setFeedback('🧪 Patch preview ready');
-          setTimeout(() => setFeedback(null), 2000);
+          setFeedbackWithTimeout('🧪 Patch preview ready', 2000); // ✅ FIX #2: Cleaned timer
           break;
         case 'snapshotGenerated':
           logger.log('[RL4 WebView] Snapshot received, length:', message.payload?.length); // ✅ FIXED
@@ -297,10 +341,21 @@ export default function App() {
         case 'githubConnected':
           setFeedback('✅ GitHub connected successfully!');
           setTimeout(() => setFeedback(null), 3000);
-          // Request updated status
-          if (window.vscode) {
-            window.vscode.postMessage({ type: 'checkGitHubStatus' });
-          }
+          break;
+        
+        case 'kernelStatus':
+          logger.log('[RL4 WebView] Kernel status received:', message.payload);
+          setKernelStatus(message.payload);
+          break;
+        
+        case 'kernel:notReady':
+          logger.warn('[RL4 WebView] Kernel not ready:', message.reason);
+          setKernelStatus({
+            ready: false,
+            message: message.message || `Kernel not ready: ${message.reason}`,
+            error: true,
+            safeMode: message.safeMode || false
+          });
           break;
           
         case 'githubError':
@@ -437,6 +492,30 @@ export default function App() {
     }
   }, []);
 
+  // Request kernel status on mount and poll if not ready
+  // ✅ P0-CORE-00: Fixed infinite polling loop
+  useEffect(() => {
+    if (!window.vscode) return;
+    
+    // Request immediately
+    window.vscode.postMessage({ type: 'requestStatus' });
+    
+    // Stop polling entirely if kernel is ready
+    if (kernelStatus?.ready) return;
+    
+    // Poll every 2s ONLY if kernel is not ready
+    const pollInterval = setInterval(() => {
+      // Double-check: stop if kernel became ready
+      if (kernelStatus?.ready) {
+        clearInterval(pollInterval);
+        return;
+      }
+      window.vscode?.postMessage({ type: 'requestStatus' });
+    }, 2000); // Exactly 2 seconds
+    
+    return () => clearInterval(pollInterval);
+  }, [kernelStatus?.ready]); // ✅ Only depend on ready state, not entire kernelStatus object
+
   // Generate commit prompt handler
   const handleGenerateCommitPrompt = () => {
     if (window.vscode) {
@@ -560,8 +639,8 @@ export default function App() {
                 title="New proposals / Changes"
                 style={{
                   marginLeft: '8px',
-                  background: '#d32f2f',
-                  color: 'white',
+                  background: 'var(--vscode-inputValidation-errorBorder)',
+                  color: 'var(--vscode-editor-background)',
                   borderRadius: '10px',
                   padding: '0 6px',
                   fontSize: '10px',
@@ -606,6 +685,64 @@ export default function App() {
 
         {activeTab === 'control' && (
         <div className="rl4-hero">
+          {/* Kernel Status */}
+          {kernelStatus && (
+            <div className="kernel-status" style={{ 
+              marginBottom: '20px', 
+              padding: '15px', 
+              border: '1px solid var(--vscode-input-border)', 
+              borderRadius: '4px', 
+              backgroundColor: 'var(--vscode-input-background)' 
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <strong>🧠 Kernel Status</strong>
+                <span style={{ 
+                  fontSize: '12px', 
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  backgroundColor: kernelStatus.ready 
+                    ? (kernelStatus.status?.safeMode ? 'var(--vscode-inputValidation-warningBackground)' : 'var(--vscode-inputValidation-infoBackground)')
+                    : 'var(--vscode-inputValidation-errorBackground)',
+                  color: kernelStatus.ready 
+                    ? (kernelStatus.status?.safeMode ? 'var(--vscode-inputValidation-warningBorder)' : 'var(--vscode-inputValidation-infoBorder)')
+                    : 'var(--vscode-inputValidation-errorBorder)'
+                }}>
+                  {kernelStatus.ready 
+                    ? (kernelStatus.status?.safeMode ? '⚠️ SAFE MODE' : '✅ Ready')
+                    : (kernelStatus.initializing ? '⏳ Initializing...' : '❌ Not Ready')
+                  }
+                </span>
+              </div>
+              {kernelStatus.ready && kernelStatus.status && (
+                <div style={{ fontSize: '12px', color: 'var(--vscode-descriptionForeground)' }}>
+                  <div>Cycle: {kernelStatus.status.cycleCount} | Uptime: {Math.floor(kernelStatus.status.uptime / 1000)}s | Timers: {kernelStatus.status.timers}</div>
+                  {kernelStatus.status.cycleHealth && (
+                    <div style={{ marginTop: '8px', fontSize: '11px' }}>
+                      Last Cycle: {kernelStatus.status.cycleHealth.success ? '✅' : '❌'} 
+                      {kernelStatus.status.cycleHealth.duration}ms | 
+                      Phases: {kernelStatus.status.cycleHealth.phases?.length || 0}
+                      {kernelStatus.status.cycleHealth.error && (
+                        <div style={{ color: 'var(--vscode-inputValidation-errorBorder)', marginTop: '4px' }}>
+                          Error: {kernelStatus.status.cycleHealth.error}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {kernelStatus.status.safeMode && kernelStatus.status.corruptionReason && (
+                    <div style={{ marginTop: '8px', color: 'var(--vscode-inputValidation-warningBorder)' }}>
+                      ⚠️ {kernelStatus.status.corruptionReason}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!kernelStatus.ready && kernelStatus.message && (
+                <div style={{ fontSize: '12px', color: 'var(--vscode-descriptionForeground)' }}>
+                  {kernelStatus.message}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Deviation Mode Selector */}
           <div className="deviation-mode-selector">
             <label htmlFor="deviation-mode">🎯 Calibrate your coding Agent:</label>
@@ -632,8 +769,9 @@ export default function App() {
 
           <button 
             onClick={handleGenerateSnapshot}
-            disabled={loading}
+            disabled={loading || !kernelStatus?.ready || kernelStatus?.status?.safeMode}
             className="generate-button"
+            title={!kernelStatus?.ready ? 'Kernel not ready' : kernelStatus?.status?.safeMode ? 'Kernel in SAFE MODE' : ''}
           >
             {loading ? '⏳ Generating Snapshot...' : '📋 Generate Context Snapshot'}
           </button>
@@ -651,7 +789,7 @@ export default function App() {
               <div>
                 <strong>🔗 GitHub Integration</strong>
                 {githubStatus && (
-                  <span style={{ marginLeft: '10px', fontSize: '12px', color: githubStatus.connected ? '#4caf50' : '#ff9800' }}>
+                  <span style={{ marginLeft: '10px', fontSize: '12px', color: githubStatus.connected ? 'var(--vscode-textLink-foreground)' : 'var(--vscode-inputValidation-warningBorder)' }}>
                     {githubStatus.connected 
                       ? `✅ Connected to ${githubStatus.repo || 'repository'}`
                       : `⚠️ ${githubStatus.reason === 'no_repo' ? 'No repository detected' : githubStatus.reason === 'missing_token' ? 'No token configured' : 'Not connected'}`
@@ -690,16 +828,19 @@ export default function App() {
               </p>
               <button
                 onClick={handleGenerateCommitPrompt}
+                disabled={!kernelStatus?.ready || kernelStatus?.status?.safeMode}
                 style={{
                   padding: '6px 12px',
                   backgroundColor: 'var(--vscode-button-background)',
                   color: 'var(--vscode-button-foreground)',
                   border: 'none',
                   borderRadius: '2px',
-                  cursor: 'pointer',
+                  cursor: (!kernelStatus?.ready || kernelStatus?.status?.safeMode) ? 'not-allowed' : 'pointer',
                   fontSize: '12px',
-                  marginRight: '10px'
+                  marginRight: '10px',
+                  opacity: (!kernelStatus?.ready || kernelStatus?.status?.safeMode) ? 0.5 : 1
                 }}
+                title={!kernelStatus?.ready ? 'Kernel not ready' : kernelStatus?.status?.safeMode ? 'Kernel in SAFE MODE' : ''}
               >
                 📋 Generate Commit Prompt
               </button>
@@ -779,9 +920,9 @@ export default function App() {
                           backgroundColor: 'var(--vscode-textBlockQuote-background)', 
                           borderRadius: '4px',
                           marginBottom: '10px',
-                          borderLeft: '3px solid #4caf50'
+                          borderLeft: '3px solid var(--vscode-textLink-foreground)'
                         }}>
-                          <strong style={{ fontSize: '11px', color: '#4caf50' }}>💡 WHY:</strong>
+                          <strong style={{ fontSize: '11px', color: 'var(--vscode-textLink-foreground)' }}>💡 WHY:</strong>
                           <p style={{ fontSize: '11px', marginTop: '5px', marginBottom: '0' }}>
                             {commitWhy}
                           </p>
@@ -836,16 +977,19 @@ export default function App() {
                       <div style={{ display: 'flex', gap: '10px' }}>
                         <button
                           onClick={handleValidateCommit}
+                          disabled={!kernelStatus?.ready || kernelStatus?.status?.safeMode}
                           style={{
                             padding: '6px 12px',
-                            backgroundColor: '#4caf50',
-                            color: 'white',
+                            backgroundColor: 'var(--vscode-button-background)',
+                            color: 'var(--vscode-button-foreground)',
                             border: 'none',
                             borderRadius: '2px',
-                            cursor: 'pointer',
+                            cursor: (!kernelStatus?.ready || kernelStatus?.status?.safeMode) ? 'not-allowed' : 'pointer',
                             fontSize: '12px',
-                            fontWeight: 'bold'
+                            fontWeight: 'bold',
+                            opacity: (!kernelStatus?.ready || kernelStatus?.status?.safeMode) ? 0.5 : 1
                           }}
+                          title={!kernelStatus?.ready ? 'Kernel not ready' : kernelStatus?.status?.safeMode ? 'Kernel in SAFE MODE' : ''}
                         >
                           ✅ Validate & Execute
                         </button>
@@ -890,103 +1034,66 @@ export default function App() {
         )}
 
         {activeTab === 'dev' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div className="dev-tab-container">
             {/* Import LLM Response Button */}
-            <div style={{ marginBottom: '8px' }}>
+            <div className="dev-section">
               <button
                 onClick={() => {
                   if (window.vscode) {
                     window.vscode.postMessage({ type: 'importLLMResponse' });
                   }
                 }}
+                disabled={!kernelStatus?.ready || kernelStatus?.status?.safeMode}
+                className="dev-button-primary"
                 style={{
-                  width: '100%',
-                  padding: '10px 16px',
-                  fontSize: '13px',
-                  background: 'var(--vscode-button-background)',
-                  color: 'var(--vscode-button-foreground)',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: 600
+                  opacity: (!kernelStatus?.ready || kernelStatus?.status?.safeMode) ? 0.5 : 1,
+                  cursor: (!kernelStatus?.ready || kernelStatus?.status?.safeMode) ? 'not-allowed' : 'pointer'
                 }}
+                title={!kernelStatus?.ready ? 'Kernel not ready' : kernelStatus?.status?.safeMode ? 'Kernel in SAFE MODE' : ''}
               >
                 📥 Import LLM Response (from clipboard)
               </button>
-              <p style={{ fontSize: '10px', color: 'var(--vscode-descriptionForeground)', margin: '6px 0 0 0' }}>
+              <p className="dev-help-text">
                 Copy your LLM response (with <code>RL4_PROPOSAL</code> wrapper) and click this button to populate cognitive files.
               </p>
             </div>
 
             {/* Auto-Suggestions Section */}
             {suggestions.length > 0 && (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <h2 style={{ margin: 0 }}>💡 Suggested Conditions</h2>
+              <div className="dev-section">
+                <div className="dev-section-header">
+                  <h2>💡 Suggested Conditions</h2>
                   <button
                     onClick={() => {
                       if (window.vscode) {
                         window.vscode.postMessage({ type: 'requestSuggestions' });
                       }
                     }}
-                    style={{ 
-                      padding: '4px 8px', 
-                      fontSize: '11px', 
-                      background: 'var(--vscode-button-secondaryBackground)', 
-                      color: 'var(--vscode-button-foreground)', 
-                      border: 'none', 
-                      borderRadius: '3px', 
-                      cursor: 'pointer' 
-                    }}
+                    className="dev-button-secondary"
                   >
                     🔄 Refresh
                   </button>
                 </div>
-                <div style={{ 
-                  border: '1px solid #ff9800', 
-                  borderRadius: '4px', 
-                  background: 'rgba(255, 152, 0, 0.1)' 
-                }}>
-                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                <div className="dev-card-suggestions">
+                  <ul className="dev-list">
                     {suggestions.map(suggestion => (
-                      <li 
-                        key={suggestion.taskId} 
-                        style={{ 
-                          padding: '10px 12px', 
-                          borderTop: '1px solid rgba(255, 152, 0, 0.3)',
-                          ':first-child': { borderTop: 'none' }
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                      <li key={suggestion.taskId} className="dev-list-item-suggestions">
+                        <div className="dev-item-content">
+                          <div className="dev-item-main">
+                            <div className="dev-item-title">
                               {suggestion.taskTitle}
-                              <span 
-                                style={{ 
-                                  marginLeft: '8px',
-                                  padding: '2px 6px',
-                                  fontSize: '10px',
-                                  borderRadius: '3px',
-                                  background: suggestion.confidence === 'HIGH' ? '#2e7d32' : suggestion.confidence === 'MEDIUM' ? '#ff9800' : '#757575',
-                                  color: 'white'
-                                }}
-                              >
+                              <span className={`dev-badge ${suggestion.confidence === 'HIGH' ? 'dev-badge-high' : suggestion.confidence === 'MEDIUM' ? 'dev-badge-medium' : 'dev-badge-low'}`}>
                                 {suggestion.confidence}
                               </span>
                             </div>
-                            <div style={{ fontSize: '11px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px' }}>
-                              <strong>Suggested:</strong> <code style={{ 
-                                background: 'var(--vscode-textCodeBlock-background)', 
-                                padding: '2px 4px', 
-                                borderRadius: '2px',
-                                fontSize: '10px'
-                              }}>@rl4:completeWhen="{suggestion.suggestedCondition}"</code>
+                            <div className="dev-item-description">
+                              <strong>Suggested:</strong> <code className="dev-item-code">@rl4:completeWhen="{suggestion.suggestedCondition}"</code>
                             </div>
-                            <div style={{ fontSize: '10px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px' }}>
+                            <div className="dev-item-description" style={{ fontSize: '10px' }}>
                               {suggestion.reason}
                             </div>
                             {suggestion.matchedPattern && (
-                              <div style={{ fontSize: '10px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px' }}>
+                              <div className="dev-item-description" style={{ fontSize: '10px' }}>
                                 📊 Based on similar task: <em>{suggestion.matchedPattern.taskTitle || suggestion.matchedPattern.taskId}</em> ({suggestion.matchedPattern.runsCount} runs, {Math.round(suggestion.matchedPattern.successRate * 100)}% success)
                               </div>
                             )}
@@ -1003,16 +1110,7 @@ export default function App() {
                                 });
                               }
                             }}
-                            style={{ 
-                              padding: '6px 10px', 
-                              fontSize: '11px', 
-                              background: '#2e7d32', 
-                              color: 'white', 
-                              border: 'none', 
-                              borderRadius: '3px', 
-                              cursor: 'pointer',
-                              whiteSpace: 'nowrap'
-                            }}
+                            className="dev-button-success"
                           >
                             ✅ Apply
                           </button>
@@ -1026,103 +1124,62 @@ export default function App() {
 
             {/* Ad-Hoc Actions Section (Suggested from Activity) */}
             {adHocActions.length > 0 && (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <h2 style={{ margin: 0 }}>🔍 Suggested from Activity</h2>
+              <div className="dev-section">
+                <div className="dev-section-header">
+                  <h2>🔍 Suggested from Activity</h2>
                   <button
                     onClick={() => {
                       if (window.vscode) {
                         window.vscode.postMessage({ type: 'requestAdHocActions' });
                       }
                     }}
-                    style={{ 
-                      padding: '4px 8px', 
-                      fontSize: '11px', 
-                      background: 'var(--vscode-button-secondaryBackground)', 
-                      color: 'var(--vscode-button-foreground)', 
-                      border: 'none', 
-                      borderRadius: '3px', 
-                      cursor: 'pointer' 
-                    }}
+                    className="dev-button-secondary"
                   >
                     🔄 Refresh
                   </button>
                 </div>
-                <div style={{ 
-                  border: '1px solid #2196f3', 
-                  borderRadius: '4px', 
-                  background: 'rgba(33, 150, 243, 0.1)' 
-                }}>
-                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                <div className="dev-card-actions">
+                  <ul className="dev-list">
                     {adHocActions.slice(0, 10).map((action, index) => (
-                      <li 
-                        key={`${action.timestamp}-${index}`} 
-                        style={{ 
-                          padding: '10px 12px', 
-                          borderTop: index === 0 ? 'none' : '1px solid rgba(33, 150, 243, 0.3)'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                      <li key={`${action.timestamp}-${index}`} className="dev-list-item-actions">
+                        <div className="dev-item-content">
+                          <div className="dev-item-main">
+                            <div className="dev-item-title">
                               {action.suggestedTask}
-                              <span 
-                                style={{ 
-                                  marginLeft: '8px',
-                                  padding: '2px 6px',
-                                  fontSize: '10px',
-                                  borderRadius: '3px',
-                                  background: action.confidence === 'HIGH' ? '#2e7d32' : action.confidence === 'MEDIUM' ? '#ff9800' : '#757575',
-                                  color: 'white'
-                                }}
-                              >
+                              <span className={`dev-badge ${action.confidence === 'HIGH' ? 'dev-badge-high' : action.confidence === 'MEDIUM' ? 'dev-badge-medium' : 'dev-badge-low'}`}>
                                 {action.confidence}
                               </span>
                             </div>
-                            <div style={{ fontSize: '11px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px' }}>
+                            <div className="dev-item-description">
                               <strong>Type:</strong> {action.action.replace('_', ' ')} • <strong>Time:</strong> {new Date(action.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                             </div>
                             {action.command && (
-                              <div style={{ fontSize: '10px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px' }}>
-                                <code style={{ 
-                                  background: 'var(--vscode-textCodeBlock-background)', 
-                                  padding: '2px 4px', 
-                                  borderRadius: '2px',
-                                  fontSize: '9px'
-                                }}>{action.command.substring(0, 80)}{action.command.length > 80 ? '...' : ''}</code>
+                              <div className="dev-item-description" style={{ fontSize: '10px' }}>
+                                <code className="dev-item-code-small">{action.command.substring(0, 80)}{action.command.length > 80 ? '...' : ''}</code>
                               </div>
                             )}
                             {action.file && (
-                              <div style={{ fontSize: '10px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px' }}>
+                              <div className="dev-item-description" style={{ fontSize: '10px' }}>
                                 📄 File: <em>{action.file}</em>
                               </div>
                             )}
                             {action.commitMessage && (
-                              <div style={{ fontSize: '10px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px' }}>
+                              <div className="dev-item-description" style={{ fontSize: '10px' }}>
                                 📝 Commit: <em>"{action.commitMessage.substring(0, 60)}{action.commitMessage.length > 60 ? '...' : ''}"</em>
                               </div>
                             )}
-                            <div style={{ fontSize: '10px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px', fontStyle: 'italic' }}>
+                            <div className="dev-item-description" style={{ fontSize: '10px', fontStyle: 'italic' }}>
                               {action.reason}
                             </div>
                           </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div className="dev-actions-group-vertical">
                             <button
                               onClick={() => {
                                 // TODO: Implement create task from ad-hoc action
                                 setFeedback('💡 Create task feature coming soon!');
                                 setTimeout(() => setFeedback(null), 2000);
                               }}
-                              style={{ 
-                                padding: '4px 8px', 
-                                fontSize: '10px', 
-                                background: '#2e7d32', 
-                                color: 'white', 
-                                border: 'none', 
-                                borderRadius: '3px', 
-                                cursor: 'pointer',
-                                whiteSpace: 'nowrap'
-                              }}
+                              className="dev-button-success-small"
                             >
                               ✅ Create Task
                             </button>
@@ -1133,16 +1190,7 @@ export default function App() {
                                 setFeedback('🗑️ Action ignored');
                                 setTimeout(() => setFeedback(null), 1500);
                               }}
-                              style={{ 
-                                padding: '4px 8px', 
-                                fontSize: '10px', 
-                                background: '#9e9e9e', 
-                                color: 'white', 
-                                border: 'none', 
-                                borderRadius: '3px', 
-                                cursor: 'pointer',
-                                whiteSpace: 'nowrap'
-                              }}
+                              className="dev-button-danger-small"
                             >
                               🗑️ Ignore
                             </button>
@@ -1153,113 +1201,108 @@ export default function App() {
                   </ul>
                 </div>
                 {adHocActions.length > 10 && (
-                  <div style={{ fontSize: '11px', color: 'var(--vscode-descriptionForeground)', marginTop: '8px', textAlign: 'center' }}>
+                  <div className="dev-count-text">
                     Showing 10 of {adHocActions.length} detected actions
                   </div>
                 )}
               </div>
             )}
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h2>🧩 Proposed Tasks (LLM)</h2>
-              <div style={{ fontSize: '12px', color: 'var(--vscode-descriptionForeground)' }}>
-                New: {devBadge.newCount} · Changes: {devBadge.changedCount}
-              </div>
-            </div>
-            <div style={{ border: '1px solid var(--vscode-input-border)', borderRadius: '4px' }}>
-              {proposals.length === 0 ? (
-                <div style={{ padding: '12px', fontSize: '12px', color: 'var(--vscode-descriptionForeground)' }}>
-                  No proposals yet. Generate a snapshot in Exploratory/Free mode and paste the agent response.
+            <div className="dev-section">
+              <div className="dev-section-header">
+                <h2>🧩 Proposed Tasks (LLM)</h2>
+                <div className="dev-section-badge">
+                  New: {devBadge.newCount} · Changes: {devBadge.changedCount}
                 </div>
-              ) : (
-                <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                  {proposals.map(item => (
-                    <li key={item.id} style={{ padding: '10px 12px', borderTop: '1px solid var(--vscode-input-border)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: '13px', fontWeight: 600 }}>{item.title}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px' }}>
-                            {item.why}
+              </div>
+              <div className="dev-card">
+                {proposals.length === 0 ? (
+                  <div className="dev-empty-state">
+                    No proposals yet. Generate a snapshot in Exploratory/Free mode and paste the agent response.
+                  </div>
+                ) : (
+                  <ul className="dev-list">
+                    {proposals.map(item => (
+                      <li key={item.id} className="dev-list-item">
+                        <div className="dev-item-content">
+                          <div className="dev-item-main">
+                            <div className="dev-item-title">{item.title}</div>
+                            <div className="dev-item-description">
+                              {item.why}
+                            </div>
+                            <div className="dev-item-meta">
+                              {item.effort && <span>Effort: {item.effort}</span>}
+                              {typeof item.roi === 'number' && <span>ROI: {item.roi}/10</span>}
+                              {item.risk && <span>Risk: {item.risk}</span>}
+                              {typeof item.bias === 'number' && <span>Bias: +{item.bias}%</span>}
+                              {item.scope && <span>Scope: {item.scope}</span>}
+                            </div>
+                            {item.possibleDuplicateOf && (
+                              <div className="dev-warning-text">
+                                ⚠️ Possible duplicate of external task: {item.possibleDuplicateOf}
+                              </div>
+                            )}
                           </div>
-                          <div style={{ fontSize: '10px', marginTop: '6px', display: 'flex', gap: '10px', color: 'var(--vscode-descriptionForeground)' }}>
-                            {item.effort && <span>Effort: {item.effort}</span>}
-                            {typeof item.roi === 'number' && <span>ROI: {item.roi}/10</span>}
-                            {item.risk && <span>Risk: {item.risk}</span>}
-                            {typeof item.bias === 'number' && <span>Bias: +{item.bias}%</span>}
-                            {item.scope && <span>Scope: {item.scope}</span>}
+                          <div className="dev-actions-group">
+                            <button
+                              title="Accepter en P0"
+                              onClick={() => window.vscode?.postMessage({ type: 'submitDecisions', decisions: [{ id: item.id, action: 'accept', priority: 'P0' }] })}
+                              className="dev-button-success-p0"
+                            >
+                              ✅ Accept (P0)
+                            </button>
+                            <button
+                              title="Accepter en P1"
+                              onClick={() => window.vscode?.postMessage({ type: 'submitDecisions', decisions: [{ id: item.id, action: 'accept', priority: 'P1' }] })}
+                              className="dev-button-success-p1"
+                            >
+                              ✅ Accept (P1)
+                            </button>
+                            <button
+                              title="Backlog (P2+)"
+                              onClick={() => window.vscode?.postMessage({ type: 'submitDecisions', decisions: [{ id: item.id, action: 'backlog', priority: 'P2' }] })}
+                              className="dev-button-neutral"
+                            >
+                              📦 Backlog
+                            </button>
+                            <button
+                              title="Rejeter"
+                              onClick={() => window.vscode?.postMessage({ type: 'submitDecisions', decisions: [{ id: item.id, action: 'reject' }] })}
+                              className="dev-button-danger"
+                            >
+                              🗑️ Reject
+                            </button>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button
-                            title="Accepter en P0"
-                            onClick={() => window.vscode?.postMessage({ type: 'submitDecisions', decisions: [{ id: item.id, action: 'accept', priority: 'P0' }] })}
-                            style={{ padding: '6px 8px', fontSize: '11px', background: '#2e7d32', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer' }}
-                          >
-                            ✅ Accept (P0)
-                          </button>
-                          <button
-                            title="Accepter en P1"
-                            onClick={() => window.vscode?.postMessage({ type: 'submitDecisions', decisions: [{ id: item.id, action: 'accept', priority: 'P1' }] })}
-                            style={{ padding: '6px 8px', fontSize: '11px', background: '#388e3c', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer' }}
-                          >
-                            ✅ Accept (P1)
-                          </button>
-                          <button
-                            title="Backlog (P2+)"
-                            onClick={() => window.vscode?.postMessage({ type: 'submitDecisions', decisions: [{ id: item.id, action: 'backlog', priority: 'P2' }] })}
-                            style={{ padding: '6px 8px', fontSize: '11px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-foreground)', border: 'none', borderRadius: '3px', cursor: 'pointer' }}
-                          >
-                            📦 Backlog
-                          </button>
-                          <button
-                            title="Rejeter"
-                            onClick={() => window.vscode?.postMessage({ type: 'submitDecisions', decisions: [{ id: item.id, action: 'reject' }] })}
-                            style={{ padding: '6px 8px', fontSize: '11px', background: '#9e9e9e', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer' }}
-                          >
-                            🗑️ Reject
-                          </button>
-                        </div>
-                      </div>
-                      {item.possibleDuplicateOf && (
-                        <div style={{ marginTop: '6px', fontSize: '10px', color: '#ffb300' }}>
-                          ⚠️ Possible duplicate of external task: {item.possibleDuplicateOf}
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
             
             {/* Task Verification Results */}
             {taskVerifications.length > 0 && (
-              <div>
-                <h3 style={{ margin: '8px 0' }}>✅ Verified Tasks (RL4)</h3>
-                <div style={{ border: '1px solid var(--vscode-input-border)', borderRadius: '4px' }}>
-                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              <div className="dev-section">
+                <div className="dev-section-header">
+                  <h3>✅ Verified Tasks (RL4)</h3>
+                </div>
+                <div className="dev-card">
+                  <ul className="dev-list">
                     {taskVerifications.map(verification => (
-                      <li key={verification.taskId} style={{ padding: '10px 12px', borderTop: '1px solid var(--vscode-input-border)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                      <li key={verification.taskId} className="dev-list-item">
+                        <div className="dev-item-content">
+                          <div className="dev-item-main">
+                            <div className="dev-item-title">
                               Task #{verification.taskId}
-                              <span 
-                                style={{ 
-                                  marginLeft: '8px',
-                                  padding: '2px 6px',
-                                  fontSize: '10px',
-                                  borderRadius: '3px',
-                                  background: verification.confidence === 'high' ? '#2e7d32' : verification.confidence === 'medium' ? '#ff9800' : '#757575',
-                                  color: 'white'
-                                }}
-                              >
+                              <span className={`dev-badge ${verification.confidence === 'high' ? 'dev-badge-high' : verification.confidence === 'medium' ? 'dev-badge-medium' : 'dev-badge-low'}`}>
                                 {verification.confidence.toUpperCase()}
                               </span>
                             </div>
-                            <div style={{ fontSize: '11px', color: 'var(--vscode-descriptionForeground)', marginTop: '4px' }}>
+                            <div className="dev-item-description">
                               {verification.suggestion}
                             </div>
-                            <div style={{ fontSize: '10px', marginTop: '6px', color: 'var(--vscode-descriptionForeground)' }}>
+                            <div className="dev-item-description" style={{ fontSize: '10px' }}>
                               ✅ Matched: {verification.matchedConditions.length} condition(s)
                               {verification.verifiedAt && (
                                 <span style={{ marginLeft: '10px' }}>
@@ -1268,7 +1311,7 @@ export default function App() {
                               )}
                             </div>
                             {verification.matchedConditions.length > 0 && (
-                              <div style={{ fontSize: '10px', marginTop: '4px', color: 'var(--vscode-descriptionForeground)' }}>
+                              <div className="dev-item-description" style={{ fontSize: '10px' }}>
                                 <details>
                                   <summary style={{ cursor: 'pointer' }}>📋 Conditions</summary>
                                   <ul style={{ marginTop: '4px', paddingLeft: '20px' }}>
@@ -1283,15 +1326,7 @@ export default function App() {
                           <div>
                             <button
                               onClick={() => handleMarkTaskDone(verification.taskId)}
-                              style={{ 
-                                padding: '6px 10px', 
-                                fontSize: '11px', 
-                                background: '#2e7d32', 
-                                color: 'white', 
-                                border: 'none', 
-                                borderRadius: '3px', 
-                                cursor: 'pointer' 
-                              }}
+                              className="dev-button-success"
                               title="Mark this task as done in Tasks.RL4"
                             >
                               ✅ Mark as Done
@@ -1305,30 +1340,41 @@ export default function App() {
               </div>
             )}
             
-            <div>
-              <h3 style={{ margin: '8px 0' }}>🧪 Patch Preview</h3>
+            <div className="dev-section">
+              <div className="dev-section-header">
+                <h3>🧪 Patch Preview</h3>
+              </div>
               {patchPreview ? (
-                <div style={{ border: '1px solid var(--vscode-input-border)', borderRadius: '4px', padding: '10px' }}>
-                  <pre style={{ fontSize: '11px', whiteSpace: 'pre-wrap', margin: 0 }}>
+                <div className="dev-patch-preview">
+                  <pre>
                     {JSON.stringify(patchPreview, null, 2)}
                   </pre>
-                  <div style={{ marginTop: '10px', display: 'flex', gap: '8px' }}>
+                  <div className="dev-patch-actions">
                     <button
                       onClick={() => window.vscode?.postMessage({ type: 'applyPatch', patch: patchPreview })}
-                      style={{ padding: '6px 10px', background: 'var(--vscode-button-background)', color: 'var(--vscode-button-foreground)', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '12px' }}
+                      disabled={!kernelStatus?.ready || kernelStatus?.status?.safeMode}
+                      className="dev-button-primary"
+                      style={{ 
+                        width: 'auto', 
+                        fontSize: '12px',
+                        opacity: (!kernelStatus?.ready || kernelStatus?.status?.safeMode) ? 0.5 : 1,
+                        cursor: (!kernelStatus?.ready || kernelStatus?.status?.safeMode) ? 'not-allowed' : 'pointer'
+                      }}
+                      title={!kernelStatus?.ready ? 'Kernel not ready' : kernelStatus?.status?.safeMode ? 'Kernel in SAFE MODE' : ''}
                     >
                       ✅ Apply Patch
                     </button>
                     <button
                       onClick={() => setPatchPreview(null)}
-                      style={{ padding: '6px 10px', background: 'var(--vscode-button-secondaryBackground)', color: 'var(--vscode-button-foreground)', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '12px' }}
+                      className="dev-button-neutral"
+                      style={{ fontSize: '12px' }}
                     >
                       ❌ Discard
                     </button>
                   </div>
                 </div>
               ) : (
-                <div style={{ fontSize: '12px', color: 'var(--vscode-descriptionForeground)' }}>
+                <div className="dev-empty-state">
                   Generated after your decisions. A `RL4_TASKS_PATCH` preview will appear here before applying.
                 </div>
               )}
@@ -1479,7 +1525,7 @@ export default function App() {
       {/* Footer */}
       <footer className="rl4-footer">
         <p>RL4 — Development Context Snapshot</p>
-        <p style={{ fontSize: '11px', color: '#666' }}>
+        <p style={{ fontSize: '11px', color: 'var(--vscode-descriptionForeground)' }}>
           Files: <FileLink fileName="Plan.RL4" />, <FileLink fileName="Tasks.RL4" />, <FileLink fileName="Context.RL4" />, <FileLink fileName="ADRs.RL4" />
         </p>
       </footer>

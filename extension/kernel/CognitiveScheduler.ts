@@ -66,7 +66,16 @@ export class CognitiveScheduler {
     private watchdogTimer: NodeJS.Timeout | null = null;
     private intervalMs: number = 10000; // Default 10s
     private logger: CognitiveLogger; // Cognitive logger for normalized output
+    private ingestionLockChecker: (() => boolean) | null = null; // Callback to check ingestion lock
     private workspaceRoot: string; // Workspace root for engines
+    
+    // ✅ P0-CORE-03: Cycle Health metrics
+    private lastCycleId: number = 0;
+    private lastCycleSuccess: boolean = false;
+    private lastCycleDuration: number = 0;
+    private lastCyclePhases: PhaseResult[] = [];
+    private lastCycleError: string | null = null;
+    private pendingInitReason: string | null = null; // Reason why kernel is not ready
     
     // Phase 4: Hourly summary tracking
     private hourlySummaryTimer: NodeJS.Timeout | null = null;
@@ -144,6 +153,76 @@ export class CognitiveScheduler {
         
         // Expose to globalThis for VS Code commands
         setGlobalLedger(this.ledger);
+    }
+    
+    /**
+     * Set ingestion lock checker callback
+     * @param checker - Function that returns true if ingestion is locked
+     */
+    setIngestionLockChecker(checker: () => boolean): void {
+        this.ingestionLockChecker = checker;
+    }
+    
+    /**
+     * Get ledger status (for kernel status API)
+     * @returns Ledger status with safeMode and corruptionReason
+     */
+    getLedgerStatus(): { safeMode: boolean; corruptionReason: string | null } {
+        return this.ledger.getStatus();
+    }
+    
+    /**
+     * Get cycle count (for kernel status API)
+     * @returns Current cycle count
+     */
+    getCycleCount(): number {
+        return this.cycleCount;
+    }
+    
+    /**
+     * ✅ P0-CORE-03: Get last cycle health metrics
+     * @returns Last cycle health information
+     */
+    getLastCycleHealth(): {
+        cycleId: number;
+        success: boolean;
+        phases: PhaseResult[];
+        duration: number;
+        error: string | null;
+    } {
+        return {
+            cycleId: this.lastCycleId,
+            success: this.lastCycleSuccess,
+            phases: this.lastCyclePhases,
+            duration: this.lastCycleDuration,
+            error: this.lastCycleError
+        };
+    }
+    
+    /**
+     * ✅ P0-CORE-03: Get reason why kernel is not ready
+     * @returns Reason string or null if ready
+     */
+    getNotReadyReason(): string | null {
+        if (this.pendingInitReason) {
+            return this.pendingInitReason;
+        }
+        const ledgerStatus = this.ledger.getStatus();
+        if (ledgerStatus.safeMode) {
+            return ledgerStatus.corruptionReason || 'ledger_safe_mode';
+        }
+        if (this.isRunning) {
+            return 'cycle_in_progress';
+        }
+        return null;
+    }
+    
+    /**
+     * ✅ P0-CORE-03: Set pending initialization reason
+     * @param reason - Reason why kernel is not ready
+     */
+    setPendingInitReason(reason: string | null): void {
+        this.pendingInitReason = reason;
     }
     
     /**
@@ -467,8 +546,14 @@ export class CognitiveScheduler {
                 
                 this.lastInputHash = result.inputHash;
                 
-                // Phase 1: Pattern Learning
+                // Phase 1: Pattern Learning (skip if ingestion lock is active)
                 const patternPhase = await this.runPhase('pattern-learning', async () => {
+                    // Check if ingestion lock is active (prevents overwriting imported data)
+                    if (this.ingestionLockChecker && this.ingestionLockChecker()) {
+                        this.logger.system('⏸️ Pattern Learning skipped (ingestion lock active)', '⏸️');
+                        return { patternsDetected: 0, patterns: [], skipped: true, reason: 'ingestion_lock' };
+                    }
+                    
                     const engine = new PatternLearningEngine(this.workspaceRoot);
                     const patterns = await engine.analyzePatterns();
                     

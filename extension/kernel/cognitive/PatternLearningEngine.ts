@@ -30,12 +30,16 @@ export class PatternLearningEngine {
      * AUTO-LEARNING: Loads existing patterns (potentially improved by LLM) and builds upon them
      */
     public async analyzePatterns(): Promise<DecisionPattern[]> {
+        console.log(`[P0-CORE-00] PatternLearningEngine.analyzePatterns() started`);
+        
         // AUTO-LEARNING: Load existing patterns (may have been improved by LLM)
         const existingPatterns = this.loadPatterns();
+        console.log(`[P0-CORE-00] PatternLearningEngine: Loaded ${existingPatterns.length} existing patterns`);
         const existingPatternIds = new Set(existingPatterns.map(p => p.id));
         
         // Load all ledger entries
         const entries = await this.loadAllLedgerEntries();
+        console.log(`[P0-CORE-00] PatternLearningEngine: Analyzing ${entries.length} ledger entries for patterns`);
         
         // Analyze for NEW patterns (only detect patterns not already in existingPatterns)
         const newPatterns: DecisionPattern[] = [];
@@ -221,6 +225,7 @@ export class PatternLearningEngine {
 
     /**
      * Load all entries from ledger files
+     * ✅ P0-CORE-00: Enhanced logging for diagnostic
      */
     private async loadAllLedgerEntries(): Promise<LedgerEntry[]> {
         const entries: LedgerEntry[] = [];
@@ -237,24 +242,48 @@ export class PatternLearningEngine {
 
         // Load main ledger
         const mainLedger = path.join(this.workspaceRoot, '.reasoning_rl4', 'ledger', 'rbom_ledger.jsonl');
+        console.log(`[P0-CORE-00] PatternLearningEngine: Checking main ledger: ${mainLedger}`);
+        console.log(`[P0-CORE-00] PatternLearningEngine: File exists: ${fs.existsSync(mainLedger)}`);
+        
         if (fs.existsSync(mainLedger)) {
-            const lines = fs.readFileSync(mainLedger, 'utf-8').split('\n').filter(Boolean);
+            const content = fs.readFileSync(mainLedger, 'utf-8');
+            const lines = content.split('\n').filter(Boolean);
+            console.log(`[P0-CORE-00] PatternLearningEngine: Main ledger has ${lines.length} lines`);
+            
+            let parsedCount = 0;
+            let conflictCount = 0;
+            let errorCount = 0;
+            
             for (const line of lines) {
                 if (isGitConflictMarker(line)) {
+                    conflictCount++;
                     continue; // Skip Git conflict markers
                 }
                 try {
                     entries.push(JSON.parse(line));
+                    parsedCount++;
                 } catch (error) {
-                    // Skip invalid lines
+                    errorCount++;
+                    console.warn(`[P0-CORE-00] PatternLearningEngine: Failed to parse ledger line: ${error}`);
                 }
             }
+            
+            console.log(`[P0-CORE-00] PatternLearningEngine: Parsed ${parsedCount} entries, ${conflictCount} conflicts skipped, ${errorCount} errors`);
+        } else {
+            console.log(`[P0-CORE-00] PatternLearningEngine: Main ledger does not exist - this is normal for new workspaces`);
         }
 
         // Load external ledger
         const externalLedger = path.join(this.workspaceRoot, '.reasoning_rl4', 'external', 'ledger.jsonl');
+        console.log(`[P0-CORE-00] PatternLearningEngine: Checking external ledger: ${externalLedger}`);
+        console.log(`[P0-CORE-00] PatternLearningEngine: External file exists: ${fs.existsSync(externalLedger)}`);
+        
         if (fs.existsSync(externalLedger)) {
-            const lines = fs.readFileSync(externalLedger, 'utf-8').split('\n').filter(Boolean);
+            const content = fs.readFileSync(externalLedger, 'utf-8');
+            const lines = content.split('\n').filter(Boolean);
+            console.log(`[P0-CORE-00] PatternLearningEngine: External ledger has ${lines.length} lines`);
+            
+            let parsedCount = 0;
             for (const line of lines) {
                 if (isGitConflictMarker(line)) {
                     continue; // Skip Git conflict markers
@@ -268,12 +297,17 @@ export class PatternLearningEngine {
                         timestamp: ev.timestamp || new Date().toISOString(),
                         data: ev
                     });
+                    parsedCount++;
                 } catch (error) {
-                    // Skip invalid lines
+                    console.warn(`[P0-CORE-00] PatternLearningEngine: Failed to parse external ledger line: ${error}`);
                 }
             }
+            console.log(`[P0-CORE-00] PatternLearningEngine: Parsed ${parsedCount} external entries`);
+        } else {
+            console.log(`[P0-CORE-00] PatternLearningEngine: External ledger does not exist - this is normal`);
         }
 
+        console.log(`[P0-CORE-00] PatternLearningEngine: Total ledger entries loaded: ${entries.length}`);
         return entries;
     }
 

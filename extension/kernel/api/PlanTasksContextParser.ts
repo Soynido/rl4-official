@@ -680,5 +680,90 @@ ${data.observations.length > 0 ? `## Observations\n${data.observations.map(o => 
       return false;
     }
   }
+  
+  /**
+   * MVP-2: Validate STRICT mode permissions
+   * STRICT mode: P0 only, no file creations, no modifications outside scope
+   */
+  validateStrictMode(
+    mutations: { filesCreated: string[]; filesModified: string[]; directoriesCreated: string[] },
+    tasks: TasksData
+  ): { valid: boolean; violations: string[] } {
+    const violations: string[] = [];
+    
+    // Rule 1: No file creations
+    if (mutations.filesCreated.length > 0) {
+      violations.push(`STRICT: Cannot create files (${mutations.filesCreated.length} created: ${mutations.filesCreated.join(', ')})`);
+    }
+    
+    // Rule 2: No directory creations
+    if (mutations.directoriesCreated.length > 0) {
+      violations.push(`STRICT: Cannot create directories (${mutations.directoriesCreated.join(', ')})`);
+    }
+    
+    // Rule 3: Only P0 tasks
+    const nonP0Tasks = tasks.active.filter(t => !t.task.includes('[P0]'));
+    if (nonP0Tasks.length > 0) {
+      violations.push(`STRICT: Only P0 tasks allowed (found non-P0: ${nonP0Tasks.length})`);
+    }
+    
+    // Rule 4: Excessive modifications (soft warning)
+    if (mutations.filesModified.length > 10) {
+      violations.push(`STRICT: Suspicious number of file modifications (${mutations.filesModified.length})`);
+    }
+    
+    return {
+      valid: violations.length === 0,
+      violations
+    };
+  }
+  
+  /**
+   * MVP-2: Validate FLEXIBLE mode permissions
+   * FLEXIBLE mode: P0+P1, max 3 files created, max 5 modified, no directories
+   */
+  validateFlexibleMode(
+    mutations: { filesCreated: string[]; filesModified: string[]; directoriesCreated: string[] },
+    tasks: TasksData
+  ): { valid: boolean; violations: string[] } {
+    const violations: string[] = [];
+    
+    // Rule 1: Max 3 files created
+    if (mutations.filesCreated.length > 3) {
+      violations.push(`FLEXIBLE: Max 3 files created (found ${mutations.filesCreated.length}: ${mutations.filesCreated.join(', ')})`);
+    }
+    
+    // Rule 2: Max 5 files modified
+    if (mutations.filesModified.length > 5) {
+      violations.push(`FLEXIBLE: Max 5 files modified (found ${mutations.filesModified.length})`);
+    }
+    
+    // Rule 3: No directory creations
+    if (mutations.directoriesCreated.length > 0) {
+      violations.push(`FLEXIBLE: Cannot create directories (${mutations.directoriesCreated.join(', ')})`);
+    }
+    
+    // Rule 4: Only P0 + P1 tasks
+    const invalidTasks = tasks.active.filter(t => 
+      !t.task.includes('[P0]') && !t.task.includes('[P1]')
+    );
+    if (invalidTasks.length > 0) {
+      violations.push(`FLEXIBLE: Only P0/P1 tasks allowed (found ${invalidTasks.length} invalid)`);
+    }
+    
+    // Rule 5: Detect helper/util files (soft warning - log only)
+    const helperFiles = mutations.filesCreated.filter(f => 
+      f.includes('helper') || f.includes('util') || 
+      f.includes('Helper') || f.includes('Util')
+    );
+    if (helperFiles.length > 0) {
+      console.warn(`[PlanTasksContextParser] FLEXIBLE: Helper files detected (soft): ${helperFiles.join(', ')}`);
+    }
+    
+    return {
+      valid: violations.length === 0,
+      violations
+    };
+  }
 }
 
